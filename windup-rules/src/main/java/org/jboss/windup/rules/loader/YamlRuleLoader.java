@@ -1,5 +1,6 @@
 package org.jboss.windup.rules.loader;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
@@ -29,26 +30,25 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
- * Loads YAML-based rule definitions ({@code .rules.yaml} files) from a directory
- * and converts them into {@link RuleProvider} instances that can be executed by
- * the rule engine.
- * <p>
- * This replaces the legacy XML (.windup.xml) rule format and OCPSoft Rewrite
- * engine with a simpler YAML format parsed by Jackson.
+ * Loads Konveyor-format YAML rule files ({@code *.yaml}) from a directory
+ * and converts them into {@link RuleProvider} instances.
+ *
+ * <p>Each file contains a bare YAML array of rules (no wrapper object).
+ * Files named {@code ruleset.yaml} are skipped — they contain ruleset
+ * metadata that is handled separately.</p>
  */
 @ApplicationScoped
 public class YamlRuleLoader {
 
     private static final Logger LOG = Logger.getLogger(YamlRuleLoader.class.getName());
-    private static final String RULES_FILE_SUFFIX = ".rules.yaml";
+    private static final String YAML_EXTENSION = ".yaml";
+    private static final String RULESET_METADATA = "ruleset.yaml";
+    private static final TypeReference<List<YamlRule>> RULE_LIST_TYPE = new TypeReference<>() {};
 
     private final ObjectMapper yamlMapper;
     private final YamlRuleConditionFactory conditionFactory;
     private final YamlRuleActionFactory actionFactory;
 
-    /**
-     * CDI constructor.
-     */
     @Inject
     public YamlRuleLoader(YamlRuleConditionFactory conditionFactory,
                           YamlRuleActionFactory actionFactory) {
@@ -57,9 +57,6 @@ public class YamlRuleLoader {
         this.actionFactory = actionFactory;
     }
 
-    /**
-     * No-arg constructor for CDI proxy creation.
-     */
     @SuppressWarnings("unused")
     YamlRuleLoader() {
         this.yamlMapper = null;
@@ -68,13 +65,9 @@ public class YamlRuleLoader {
     }
 
     /**
-     * Scans the given directory (recursively) for {@code .rules.yaml} files,
-     * deserializes each into a {@link YamlRuleDefinition}, and converts them
-     * into {@link RuleProvider} instances.
-     *
-     * @param rulesDirectory the root directory to scan
-     * @return a list of loaded rule providers (never null)
-     * @throws UncheckedIOException if directory scanning or file reading fails
+     * Scans the given directory (recursively) for {@code *.yaml} files
+     * (excluding {@code ruleset.yaml}), deserializes each as a list of
+     * {@link YamlRule}, and converts them into {@link RuleProvider} instances.
      */
     public List<RuleProvider> loadRules(Path rulesDirectory) {
         if (rulesDirectory == null || !Files.isDirectory(rulesDirectory)) {
@@ -84,16 +77,16 @@ public class YamlRuleLoader {
 
         List<Path> ruleFiles = findRuleFiles(rulesDirectory);
         if (ruleFiles.isEmpty()) {
-            LOG.fine(() -> "No .rules.yaml files found in: " + rulesDirectory);
+            LOG.fine(() -> "No .yaml rule files found in: " + rulesDirectory);
             return List.of();
         }
 
         List<RuleProvider> providers = new ArrayList<>();
         for (Path ruleFile : ruleFiles) {
             try {
-                YamlRuleDefinition definition = parseRuleFile(ruleFile);
-                if (definition != null && definition.getRules() != null) {
-                    RuleProvider provider = convertToRuleProvider(definition.getRules(), ruleFile);
+                List<YamlRule> rules = parseRuleFile(ruleFile);
+                if (rules != null && !rules.isEmpty()) {
+                    RuleProvider provider = convertToRuleProvider(rules, ruleFile);
                     providers.add(provider);
                     LOG.info(() -> String.format("Loaded ruleset '%s' with %d rules from %s",
                             provider.getMetadata().id(),
@@ -108,14 +101,12 @@ public class YamlRuleLoader {
         return Collections.unmodifiableList(providers);
     }
 
-    /**
-     * Finds all {@code .rules.yaml} files in the given directory, recursively.
-     */
     private List<Path> findRuleFiles(Path directory) {
         try (Stream<Path> walk = Files.walk(directory)) {
             return walk
                     .filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().endsWith(RULES_FILE_SUFFIX))
+                    .filter(p -> p.getFileName().toString().endsWith(YAML_EXTENSION))
+                    .filter(p -> !p.getFileName().toString().equals(RULESET_METADATA))
                     .sorted()
                     .toList();
         } catch (IOException e) {
@@ -123,37 +114,32 @@ public class YamlRuleLoader {
         }
     }
 
-    /**
-     * Parses a single YAML rule file into a {@link YamlRuleDefinition}.
-     */
-    YamlRuleDefinition parseRuleFile(Path ruleFile) throws IOException {
-        return yamlMapper.readValue(ruleFile.toFile(), YamlRuleDefinition.class);
+    List<YamlRule> parseRuleFile(Path ruleFile) throws IOException {
+        return yamlMapper.readValue(ruleFile.toFile(), RULE_LIST_TYPE);
     }
 
-    /**
-     * Converts a parsed {@link YamlRulesetHeader} into a {@link RuleProvider}.
-     */
-    RuleProvider convertToRuleProvider(YamlRulesetHeader header, Path sourceFile) {
-        Phase phase = parsePhase(header.getPhase());
+    RuleProvider convertToRuleProvider(List<YamlRule> yamlRules, Path sourceFile) {
+        String rulesetId = deriveRulesetId(sourceFile);
 
-        Set<Technology> sourceTech = parseTechnology(header.getSourceTechnology());
-        Set<Technology> targetTech = parseTechnology(header.getTargetTechnology());
+        Set<Technology> sourceTech = new LinkedHashSet<>();
+        Set<Technology> targetTech = new LinkedHashSet<>();
+        for (YamlRule rule : yamlRules) {
+            extractTechnologies(rule, sourceTech, targetTech);
+        }
 
         RuleProviderMetadata metadata = new RuleProviderMetadata(
-                header.getId(),
-                phase,
+                rulesetId,
+                Phase.MIGRATION_RULES,
                 Set.of(),
-                sourceTech,
-                targetTech,
+                Collections.unmodifiableSet(sourceTech),
+                Collections.unmodifiableSet(targetTech),
                 List.of(),
                 List.of()
         );
 
         List<Rule> rules = new ArrayList<>();
-        if (header.getRules() != null) {
-            for (YamlRule yamlRule : header.getRules()) {
-                rules.add(convertToRule(yamlRule, header.getId(), phase));
-            }
+        for (YamlRule yamlRule : yamlRules) {
+            rules.add(convertToRule(yamlRule, rulesetId));
         }
 
         List<Rule> immutableRules = List.copyOf(rules);
@@ -175,46 +161,37 @@ public class YamlRuleLoader {
         };
     }
 
-    /**
-     * Converts a single {@link YamlRule} into a {@link Rule}.
-     */
-    private Rule convertToRule(YamlRule yamlRule, String rulesetId, Phase defaultPhase) {
-        String ruleId = rulesetId + "." + yamlRule.getId();
+    private Rule convertToRule(YamlRule yamlRule, String rulesetId) {
+        String ruleId = rulesetId + "." + yamlRule.getRuleID();
 
         RuleCondition condition = conditionFactory.createCondition(ruleId, yamlRule.getWhen());
-        RuleAction action = actionFactory.createAction(ruleId, yamlRule.getPerform());
+        RuleAction action = actionFactory.createAction(ruleId, yamlRule);
 
-        RuleMetadata ruleMetadata = new RuleMetadata(defaultPhase);
+        RuleMetadata ruleMetadata = new RuleMetadata(Phase.MIGRATION_RULES);
 
         return new Rule(ruleId, condition, action, ruleMetadata);
     }
 
-    /**
-     * Parses a phase string to a {@link Phase} enum value.
-     * Defaults to {@link Phase#MIGRATION_RULES} if null or unrecognised.
-     */
-    private Phase parsePhase(String phaseStr) {
-        if (phaseStr == null || phaseStr.isBlank()) {
-            return Phase.MIGRATION_RULES;
+    private String deriveRulesetId(Path sourceFile) {
+        String filename = sourceFile.getFileName().toString();
+        if (filename.endsWith(YAML_EXTENSION)) {
+            return filename.substring(0, filename.length() - YAML_EXTENSION.length());
         }
-        try {
-            return Phase.valueOf(phaseStr);
-        } catch (IllegalArgumentException e) {
-            LOG.warning(() -> "Unknown phase '" + phaseStr + "', defaulting to MIGRATION_RULES");
-            return Phase.MIGRATION_RULES;
-        }
+        return filename;
     }
 
-    /**
-     * Converts a YAML technology entry to a set containing one {@link Technology},
-     * or an empty set if the entry is null.
-     */
-    private Set<Technology> parseTechnology(YamlRulesetHeader.YamlTechnology yamlTech) {
-        if (yamlTech == null || yamlTech.getId() == null) {
-            return Set.of();
+    private void extractTechnologies(YamlRule rule,
+                                     Set<Technology> sourceTech,
+                                     Set<Technology> targetTech) {
+        if (rule.getLabels() == null) return;
+        for (String label : rule.getLabels()) {
+            if (label.startsWith("konveyor.io/source=")) {
+                String value = label.substring("konveyor.io/source=".length());
+                sourceTech.add(new Technology(value, null));
+            } else if (label.startsWith("konveyor.io/target=")) {
+                String value = label.substring("konveyor.io/target=".length());
+                targetTech.add(new Technology(value, null));
+            }
         }
-        Set<Technology> result = new LinkedHashSet<>();
-        result.add(new Technology(yamlTech.getId(), yamlTech.getVersion()));
-        return Collections.unmodifiableSet(result);
     }
 }

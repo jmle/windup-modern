@@ -1,0 +1,149 @@
+- ruleID: test-import
+  description: "Legacy import detected"
+  message: "A com.example.legacy import was found."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: IMPORT
+
+- ruleID: test-annotation
+  description: "Legacy annotation detected"
+  message: "A com.example.legacy annotation was found."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: ANNOTATION
+
+- ruleID: test-type
+  description: "Legacy type declaration detected"
+  message: "A type declaration matching the pattern was found."
+  effort: 1
+  category: optional
+  when:
+    java.referenced:
+      pattern: "LocationTestService"
+      location: TYPE
+
+- ruleID: test-inheritance
+  description: "Legacy inheritance detected"
+  message: "A class extends a com.example.legacy type."
+  effort: 3
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: INHERITANCE
+
+- ruleID: test-implements-type
+  description: "Legacy interface implementation detected"
+  message: "A class implements a com.example.legacy interface."
+  effort: 3
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: IMPLEMENTS_TYPE
+
+- ruleID: test-field-declaration
+  description: "Legacy field declaration detected"
+  message: "A field of a com.example.legacy type was found."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: FIELD_DECLARATION
+
+- ruleID: test-return-type
+  description: "Legacy return type detected"
+  message: "A method returns a com.example.legacy type."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: RETURN_TYPE
+
+- ruleID: test-method-parameter
+  description: "Legacy method parameter detected"
+  message: "A method parameter uses a com.example.legacy type."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: METHOD_PARAMETER
+
+- ruleID: test-throws-method-declaration
+  description: "Legacy throws declaration detected"
+  message: "A method declares throwing a com.example.legacy exception."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: THROWS_METHOD_DECLARATION
+
+- ruleID: test-variable-declaration
+  description: "Legacy variable declaration detected"
+  message: "A local variable uses a com.example.legacy type."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: VARIABLE_DECLARATION
+
+- ruleID: test-constructor-call
+  description: "Legacy constructor call detected"
+  message: "A com.example.legacy type is instantiated."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: CONSTRUCTOR_CALL
+
+- ruleID: test-method-call
+  description: "Legacy method call detected"
+  message: "A method on a com.example.legacy type is called."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}.{*}"
+      location: METHOD_CALL
+
+- ruleID: test-instance-of
+  description: "Legacy instanceof detected"
+  message: "An instanceof check against a com.example.legacy type was found."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: INSTANCE_OF
+
+- ruleID: test-throw-statement
+  description: "Legacy throw statement detected"
+  message: "A com.example.legacy exception is thrown."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: THROW_STATEMENT
+
+- ruleID: test-catch-exception-statement
+  description: "Legacy catch clause detected"
+  message: "A com.example.legacy exception is caught."
+  effort: 1
+  category: mandatory
+  when:
+    java.referenced:
+      pattern: "com.example.legacy.{*}"
+      location: CATCH_EXCEPTION_STATEMENT

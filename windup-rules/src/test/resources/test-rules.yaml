@@ -1,0 +1,44 @@
+- ruleID: ejb-001
+  description: "EJB annotation must be migrated"
+  message: "Replace javax.ejb with jakarta.ejb"
+  effort: 1
+  category: MANDATORY
+  labels:
+    - "konveyor.io/source=eap6"
+    - "konveyor.io/target=eap7"
+  links:
+    - title: "Migration Guide"
+      url: "https://example.com/ejb-migration"
+  when:
+    java.referenced:
+      pattern: "javax.ejb.{*}"
+      location: ANNOTATION
+
+- ruleID: ejb-002
+  description: "EJB Deployment Descriptor"
+  message: "This is an EJB deployment descriptor that needs updating."
+  effort: 3
+  category: MANDATORY
+  labels:
+    - "konveyor.io/source=eap6"
+    - "konveyor.io/target=eap7"
+  when:
+    builtin.xml:
+      xpath: "//jee:ejb-jar"
+      namespaces:
+        jee: "http://xmlns.jcp.org/xml/ns/javaee"
+
+- ruleID: ejb-003
+  description: "EJB technology detected"
+  message: "This file uses EJB technology."
+  effort: 0
+  category: INFORMATIONAL
+  tag:
+    - "EJB"
+  labels:
+    - "konveyor.io/source=eap6"
+    - "konveyor.io/target=eap7"
+  when:
+    builtin.filecontent:
+      pattern: "javax\\.ejb\\."
+      filePattern: "*.java"
