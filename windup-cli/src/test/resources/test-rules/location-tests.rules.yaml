@@ -1,0 +1,183 @@
+rules:
+  id: "location-tests"
+  phase: MIGRATION_RULES
+  rules:
+    - id: "test-import"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: IMPORT
+      perform:
+        hint:
+          title: "Legacy import detected"
+          message: "A com.example.legacy import was found."
+          effort: 1
+          category: mandatory
+
+    - id: "test-annotation"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: ANNOTATION
+      perform:
+        hint:
+          title: "Legacy annotation detected"
+          message: "A com.example.legacy annotation was found."
+          effort: 1
+          category: mandatory
+
+    - id: "test-type"
+      when:
+        java-class:
+          references: "LocationTestService"
+          location: TYPE
+      perform:
+        hint:
+          title: "Legacy type declaration detected"
+          message: "A type declaration matching the pattern was found."
+          effort: 1
+          category: optional
+
+    - id: "test-inheritance"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: INHERITANCE
+      perform:
+        hint:
+          title: "Legacy inheritance detected"
+          message: "A class extends a com.example.legacy type."
+          effort: 3
+          category: mandatory
+
+    - id: "test-implements-type"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: IMPLEMENTS_TYPE
+      perform:
+        hint:
+          title: "Legacy interface implementation detected"
+          message: "A class implements a com.example.legacy interface."
+          effort: 3
+          category: mandatory
+
+    - id: "test-field-declaration"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: FIELD_DECLARATION
+      perform:
+        hint:
+          title: "Legacy field declaration detected"
+          message: "A field of a com.example.legacy type was found."
+          effort: 1
+          category: mandatory
+
+    - id: "test-return-type"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: RETURN_TYPE
+      perform:
+        hint:
+          title: "Legacy return type detected"
+          message: "A method returns a com.example.legacy type."
+          effort: 1
+          category: mandatory
+
+    - id: "test-method-parameter"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: METHOD_PARAMETER
+      perform:
+        hint:
+          title: "Legacy method parameter detected"
+          message: "A method parameter uses a com.example.legacy type."
+          effort: 1
+          category: mandatory
+
+    - id: "test-throws-method-declaration"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: THROWS_METHOD_DECLARATION
+      perform:
+        hint:
+          title: "Legacy throws declaration detected"
+          message: "A method declares throwing a com.example.legacy exception."
+          effort: 1
+          category: mandatory
+
+    - id: "test-variable-declaration"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: VARIABLE_DECLARATION
+      perform:
+        hint:
+          title: "Legacy variable declaration detected"
+          message: "A local variable uses a com.example.legacy type."
+          effort: 1
+          category: mandatory
+
+    - id: "test-constructor-call"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: CONSTRUCTOR_CALL
+      perform:
+        hint:
+          title: "Legacy constructor call detected"
+          message: "A com.example.legacy type is instantiated."
+          effort: 1
+          category: mandatory
+
+    - id: "test-method-call"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}.{*}"
+          location: METHOD_CALL
+      perform:
+        hint:
+          title: "Legacy method call detected"
+          message: "A method on a com.example.legacy type is called."
+          effort: 1
+          category: mandatory
+
+    - id: "test-instance-of"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: INSTANCE_OF
+      perform:
+        hint:
+          title: "Legacy instanceof detected"
+          message: "An instanceof check against a com.example.legacy type was found."
+          effort: 1
+          category: mandatory
+
+    - id: "test-throw-statement"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: THROW_STATEMENT
+      perform:
+        hint:
+          title: "Legacy throw statement detected"
+          message: "A com.example.legacy exception is thrown."
+          effort: 1
+          category: mandatory
+
+    - id: "test-catch-exception-statement"
+      when:
+        java-class:
+          references: "com.example.legacy.{*}"
+          location: CATCH_EXCEPTION_STATEMENT
+      perform:
+        hint:
+          title: "Legacy catch clause detected"
+          message: "A com.example.legacy exception is caught."
+          effort: 1
+          category: mandatory

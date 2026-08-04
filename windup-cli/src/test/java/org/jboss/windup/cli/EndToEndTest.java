@@ -33,7 +33,6 @@ import org.jboss.windup.rules.loader.YamlRuleConditionFactory;
 import org.jboss.windup.rules.loader.YamlRuleLoader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
@@ -68,15 +67,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class EndToEndTest {
 
-    @TempDir
-    Path outputDir;
+    private static final Path OUTPUT_DIR = Path.of("target", "e2e-output");
 
+    private Path outputDir;
     private Path testProjectDir;
     private Path testRulesDir;
 
     @BeforeEach
-    void setUp() {
-        // Resolve test resource directories from classpath
+    void setUp() throws Exception {
+        outputDir = OUTPUT_DIR;
+        if (Files.exists(outputDir)) {
+            try (var walk = Files.walk(outputDir)) {
+                walk.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> p.toFile().delete());
+            }
+        }
+        Files.createDirectories(outputDir);
+
         testProjectDir = resolveResource("test-project");
         testRulesDir = resolveResource("test-rules");
     }
@@ -151,10 +158,9 @@ class EndToEndTest {
                 .as("Should discover .java source files")
                 .isNotEmpty();
 
-        // We have 3 Java files: DemoApplication.java, HelloService.java, AppConfig.java
         assertThat(javaSourceFiles)
-                .as("Should discover exactly 3 Java source files")
-                .hasSize(3);
+                .as("Should discover exactly 4 Java source files")
+                .hasSize(4);
 
         List<String> javaFileNames = javaSourceFiles.stream()
                 .map(FileModel::getFileName)
@@ -164,7 +170,8 @@ class EndToEndTest {
                 .containsExactlyInAnyOrder(
                         "DemoApplication.java",
                         "HelloService.java",
-                        "AppConfig.java");
+                        "AppConfig.java",
+                        "LocationTestService.java");
     }
 
     private void verifyJavaClassModels(AnalysisContext context) {
@@ -184,7 +191,8 @@ class EndToEndTest {
                 .contains(
                         "com.example.demo.DemoApplication",
                         "com.example.demo.HelloService",
-                        "com.example.demo.config.AppConfig");
+                        "com.example.demo.config.AppConfig",
+                        "com.example.demo.LocationTestService");
     }
 
     private void verifyJavaClassReferences(AnalysisContext context) {
@@ -219,68 +227,82 @@ class EndToEndTest {
         List<InlineHintModel> hints = hintRegistry.findAll();
 
         assertThat(hints)
-                .as("YAML migration rules should produce inline hints for javax.* usage")
+                .as("YAML migration rules should produce inline hints")
                 .isNotEmpty();
 
-        // Verify annotation-location rules matched (these use location: ANNOTATION)
+        // --- Jakarta migration rules (from jakarta-migration.rules.yaml) ---
+
         assertThat(hints)
                 .as("Should have hints for javax.ejb annotations (@Stateless, @LocalBean)")
-                .anyMatch(h -> h.getRuleId() != null && h.getRuleId().contains("javax-ejb-annotations"));
+                .anyMatch(h -> ruleIdContains(h, "javax-ejb-annotations"));
 
         assertThat(hints)
                 .as("Should have hints for javax.persistence annotations (@Entity, @Id, @Table)")
-                .anyMatch(h -> h.getRuleId() != null && h.getRuleId().contains("javax-persistence-annotations"));
+                .anyMatch(h -> ruleIdContains(h, "javax-persistence-annotations"));
 
         assertThat(hints)
                 .as("Should have hints for javax.xml.bind annotations (@XmlRootElement)")
-                .anyMatch(h -> h.getRuleId() != null && h.getRuleId().contains("javax-xml-bind-annotations"));
+                .anyMatch(h -> ruleIdContains(h, "javax-xml-bind-annotations"));
 
-        // Verify import-location rule matched (uses location: IMPORT)
         assertThat(hints)
                 .as("Should have hints for javax.xml.bind imports")
-                .anyMatch(h -> h.getRuleId() != null && h.getRuleId().contains("javax-xml-bind-api-usage"));
+                .anyMatch(h -> ruleIdContains(h, "javax-xml-bind-api-usage"));
 
-        // Verify location filter actually works: annotation rules should NOT match on imports.
-        // The ejb annotation rule uses {*} which matches single segments, so it should match
-        // @Stateless and @LocalBean annotations but NOT produce hints for every import line.
+        // --- Location test rules (from location-tests.rules.yaml) ---
+        // Each rule targets a specific ReferenceType location.
+
+        String[] locationRuleIds = {
+                "test-import",
+                "test-annotation",
+                "test-type",
+                "test-inheritance",
+                "test-implements-type",
+                "test-field-declaration",
+                "test-return-type",
+                "test-method-parameter",
+                "test-throws-method-declaration",
+                "test-variable-declaration",
+                "test-constructor-call",
+                "test-method-call",
+                "test-instance-of",
+                "test-throw-statement",
+                "test-catch-exception-statement",
+        };
+
+        for (String ruleId : locationRuleIds) {
+            assertThat(hints)
+                    .as("Location rule '%s' should produce at least one hint", ruleId)
+                    .anyMatch(h -> ruleIdContains(h, ruleId));
+        }
+
+        // --- Cross-checks: location filter isolates correctly ---
+
         List<InlineHintModel> ejbAnnotationHints = hints.stream()
-                .filter(h -> h.getRuleId() != null && h.getRuleId().contains("javax-ejb-annotations"))
+                .filter(h -> ruleIdContains(h, "javax-ejb-annotations"))
                 .toList();
-
-        // DemoApplication.java has @Stateless and @LocalBean — exactly 2 annotation references
         assertThat(ejbAnnotationHints)
                 .as("EJB annotation rule should match only annotation usages, not imports")
                 .allMatch(h -> h.getTitle().contains("annotation"));
 
-        // The javax-xml-bind-api-usage rule (location: IMPORT) should produce hints for import lines,
-        // not annotation lines. AppConfig.java imports JAXBContext, JAXBException, and annotation.XmlRootElement
-        // but {*} won't match annotation.XmlRootElement (two segments after javax.xml.bind.)
         List<InlineHintModel> xmlBindImportHints = hints.stream()
-                .filter(h -> h.getRuleId() != null && h.getRuleId().contains("javax-xml-bind-api-usage"))
+                .filter(h -> ruleIdContains(h, "javax-xml-bind-api-usage"))
                 .toList();
-
         assertThat(xmlBindImportHints)
                 .as("JAXB import rule should match import references")
                 .isNotEmpty();
 
-        // Verify each hint has meaningful content
+        // --- Every hint has meaningful content ---
+
         for (InlineHintModel hint : hints) {
-            assertThat(hint.getTitle())
-                    .as("Each hint should have a title")
-                    .isNotBlank();
-
-            assertThat(hint.getHint())
-                    .as("Each hint should have a message body")
-                    .isNotBlank();
-
-            assertThat(hint.getSourceFile())
-                    .as("Each hint should reference a source file")
-                    .isNotNull();
-
-            assertThat(hint.getEffort())
-                    .as("Each hint should have an effort level")
-                    .isNotNull();
+            assertThat(hint.getTitle()).as("Each hint should have a title").isNotBlank();
+            assertThat(hint.getHint()).as("Each hint should have a message body").isNotBlank();
+            assertThat(hint.getSourceFile()).as("Each hint should reference a source file").isNotNull();
+            assertThat(hint.getEffort()).as("Each hint should have an effort level").isNotNull();
         }
+    }
+
+    private static boolean ruleIdContains(InlineHintModel hint, String fragment) {
+        return hint.getRuleId() != null && hint.getRuleId().contains(fragment);
     }
 
     private void verifyReportModels(AnalysisContext context) {

@@ -210,7 +210,7 @@ public class TypeReferenceCollector extends ASTVisitor {
         // Without binding resolution we record the method name and
         // expression type if available.
         if (node.getExpression() != null) {
-            String expr = node.getExpression().toString();
+            String expr = resolveTypeName(node.getExpression().toString());
             String methodCall = expr + "." + node.getName().getIdentifier();
             addReference(methodCall, ReferenceType.METHOD_CALL, node.getStartPosition());
         } else {
