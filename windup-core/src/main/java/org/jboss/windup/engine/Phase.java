@@ -1,0 +1,15 @@
+package org.jboss.windup.engine;
+
+public enum Phase {
+    INITIALIZATION,
+    DISCOVERY,
+    INITIAL_ANALYSIS,
+    ARCHIVE_EXTRACTION,
+    ARCHIVE_METADATA,
+    DECOMPILATION,
+    COMPOSITION,
+    MIGRATION_RULES,
+    REPORT_GENERATION,
+    REPORT_RENDERING,
+    FINALIZE
+}

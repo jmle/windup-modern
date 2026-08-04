@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.jboss.windup</groupId>
+    <artifactId>windup-parent</artifactId>
+    <version>7.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Windup Parent</name>
+    <description>Application modernization and migration analysis engine</description>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <quarkus.platform.version>3.17.5</quarkus.platform.version>
+
+        <version.jackson>2.17.2</version.jackson>
+        <version.freemarker>2.3.33</version.freemarker>
+        <version.eclipse.jdt>3.38.0</version.eclipse.jdt>
+        <version.fernflower>1.0.0.20171018</version.fernflower>
+        <version.procyon>0.5.33</version.procyon>
+        <version.lucene>9.11.1</version.lucene>
+        <version.snakeyaml>2.2</version.snakeyaml>
+        <version.commons-io>2.16.1</version.commons-io>
+        <version.commons-lang3>3.14.0</version.commons-lang3>
+        <version.commons-compress>1.26.2</version.commons-compress>
+        <version.opencsv>5.9</version.opencsv>
+        <version.saxon>12.5</version.saxon>
+        <version.jsoup>1.18.1</version.jsoup>
+
+        <version.junit5>5.10.3</version.junit5>
+        <version.assertj>3.26.3</version.assertj>
+
+        <surefire-plugin.version>3.3.1</surefire-plugin.version>
+        <compiler-plugin.version>3.13.0</compiler-plugin.version>
+        <jandex-plugin.version>3.2.3</jandex-plugin.version>
+    </properties>
+
+    <modules>
+        <module>windup-bom</module>
+        <module>windup-core</module>
+        <module>windup-java</module>
+        <module>windup-rules</module>
+        <module>windup-reporting</module>
+        <module>windup-cli</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.quarkus.platform</groupId>
+                <artifactId>quarkus-bom</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>org.jboss.windup</groupId>
+                <artifactId>windup-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${compiler-plugin.version}</version>
+                    <configuration>
+                        <release>${maven.compiler.release}</release>
+                        <parameters>true</parameters>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${surefire-plugin.version}</version>
+                    <configuration>
+                        <argLine>-Xms256m -Xmx1024m</argLine>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>io.quarkus</groupId>
+                    <artifactId>quarkus-maven-plugin</artifactId>
+                    <version>${quarkus.platform.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>io.smallrye</groupId>
+                    <artifactId>jandex-maven-plugin</artifactId>
+                    <version>${jandex-plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>io.smallrye</groupId>
+                <artifactId>jandex-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>make-index</id>
+                        <goals>
+                            <goal>jandex</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
