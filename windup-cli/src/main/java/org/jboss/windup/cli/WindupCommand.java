@@ -45,15 +45,11 @@ public class WindupCommand implements Runnable {
     @Option(names = "--sourceMode", description = "Analyze source code (not binaries)")
     boolean sourceMode;
 
-    @Option(names = "--exportCSV", description = "Export results to CSV")
-    boolean exportCSV;
-
     @Override
     public void run() {
         var builder = AnalysisConfiguration.builder()
                 .outputDirectory(outputDirectory)
-                .sourceMode(sourceMode)
-                .exportCSV(exportCSV);
+                .sourceMode(sourceMode);
 
         inputPaths.forEach(builder::inputPath);
         if (sourceTechnologies != null) sourceTechnologies.forEach(builder::sourceTechnology);
@@ -66,6 +62,6 @@ public class WindupCommand implements Runnable {
 
         System.out.println("Analysis complete. Files: " + result.files().size()
                 + ", Projects: " + result.projects().size());
-        System.out.println("Report: " + outputDirectory.resolve("index.html"));
+        System.out.println("Output: " + outputDirectory.resolve("output.yaml"));
     }
 }

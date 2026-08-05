@@ -71,7 +71,9 @@ public class HintAction implements RuleAction {
 
             hint.setHint(message);
             hint.setEffort(effort);
+            hint.setEffortPoints(effortPoints);
             hint.setSeverity(severity);
+            hint.setCategory(category);
             hint.setRuleId(ruleId);
 
             for (LinkModel link : links) {

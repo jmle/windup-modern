@@ -22,12 +22,9 @@ import org.jboss.windup.model.AnalysisContext;
 import org.jboss.windup.model.FileModel;
 import org.jboss.windup.model.FileType;
 import org.jboss.windup.model.ModelRegistry;
-import org.jboss.windup.reporting.CSVExportService;
-import org.jboss.windup.reporting.ReportGenerationProvider;
-import org.jboss.windup.reporting.ReportRenderingProvider;
-import org.jboss.windup.reporting.ReportService;
+import org.jboss.windup.reporting.ViolationOutputProvider;
 import org.jboss.windup.reporting.model.InlineHintModel;
-import org.jboss.windup.reporting.model.ReportModel;
+import org.jboss.windup.reporting.output.ViolationOutputWriter;
 import org.jboss.windup.rules.loader.YamlRuleActionFactory;
 import org.jboss.windup.rules.loader.YamlRuleConditionFactory;
 import org.jboss.windup.rules.loader.YamlRuleLoader;
@@ -57,13 +54,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>JavaClassScanProvider (INITIAL_ANALYSIS) - scans .class bytecode</li>
  *   <li>DecompilationProvider (DECOMPILATION) - decompiles .class to .java</li>
  *   <li>YAML migration rules (MIGRATION_RULES) - loaded from test-rules/</li>
- *   <li>ReportGenerationProvider (REPORT_GENERATION) - collects report data</li>
- *   <li>ReportRenderingProvider (REPORT_RENDERING) - renders HTML/CSV</li>
+ *   <li>ViolationOutputProvider (REPORT_RENDERING) - writes output.yaml</li>
  * </ol>
- *
- * <p>This is a plain JUnit 5 test (not a Quarkus test). All components are
- * manually instantiated and wired using reflection where CDI injection is
- * needed.</p>
  */
 class EndToEndTest {
 
@@ -96,7 +88,6 @@ class EndToEndTest {
                 .outputDirectory(outputDir)
                 .userRulesPath(testRulesDir)
                 .sourceMode(true)
-                .exportCSV(true)
                 .build();
 
         // --- 2. Create the analysis run ---
@@ -137,11 +128,8 @@ class EndToEndTest {
         // --- 10. Verify: InlineHintModels were created by rule actions ---
         verifyInlineHints(context);
 
-        // --- 11. Verify: Report models were created ---
-        verifyReportModels(context);
-
-        // --- 12. Verify: Report files were generated in output directory ---
-        verifyReportFiles();
+        // --- 11. Verify: output.yaml was generated ---
+        verifyOutputYaml();
     }
 
     // ---------------------------------------------------------------
@@ -203,7 +191,6 @@ class EndToEndTest {
                 .as("Type reference collector should find Java class references")
                 .isNotEmpty();
 
-        // Verify we find import references for our javax.* imports
         List<String> importRefs = references.stream()
                 .filter(r -> r.getReferenceType() == JavaClassReference.ReferenceType.IMPORT)
                 .map(JavaClassReference::getQualifiedName)
@@ -230,7 +217,7 @@ class EndToEndTest {
                 .as("YAML migration rules should produce inline hints")
                 .isNotEmpty();
 
-        // --- Jakarta migration rules (from jakarta-migration.rules.yaml) ---
+        // --- Jakarta migration rules ---
 
         assertThat(hints)
                 .as("Should have hints for javax.ejb annotations (@Stateless, @LocalBean)")
@@ -248,8 +235,7 @@ class EndToEndTest {
                 .as("Should have hints for javax.xml.bind imports")
                 .anyMatch(h -> ruleIdContains(h, "javax-xml-bind-api-usage"));
 
-        // --- Location test rules (from location-tests.rules.yaml) ---
-        // Each rule targets a specific ReferenceType location.
+        // --- Location test rules ---
 
         String[] locationRuleIds = {
                 "test-import",
@@ -275,7 +261,7 @@ class EndToEndTest {
                     .anyMatch(h -> ruleIdContains(h, ruleId));
         }
 
-        // --- Cross-checks: location filter isolates correctly ---
+        // --- Cross-checks ---
 
         List<InlineHintModel> ejbAnnotationHints = hints.stream()
                 .filter(h -> ruleIdContains(h, "javax-ejb-annotations"))
@@ -301,89 +287,73 @@ class EndToEndTest {
         }
     }
 
+    private void verifyOutputYaml() throws Exception {
+        Path outputYaml = outputDir.resolve("output.yaml");
+        assertThat(outputYaml)
+                .as("output.yaml should be generated")
+                .exists();
+
+        String content = Files.readString(outputYaml);
+
+        assertThat(content)
+                .as("output.yaml should contain jakarta-migration ruleset")
+                .contains("jakarta-migration");
+
+        assertThat(content)
+                .as("output.yaml should contain location-tests ruleset")
+                .contains("location-tests");
+
+        assertThat(content)
+                .as("output.yaml should contain violation rule IDs")
+                .contains("javax-ejb-annotations:")
+                .contains("test-import:");
+
+        assertThat(content)
+                .as("output.yaml should contain incidents with file URIs")
+                .contains("uri: \"file://");
+
+        assertThat(content)
+                .as("output.yaml should contain incident messages")
+                .contains("message:");
+
+        assertThat(content)
+                .as("output.yaml should contain category")
+                .contains("category:");
+
+        assertThat(content)
+                .as("output.yaml should contain effort")
+                .contains("effort:");
+    }
+
     private static boolean ruleIdContains(InlineHintModel hint, String fragment) {
         return hint.getRuleId() != null && hint.getRuleId().contains(fragment);
-    }
-
-    private void verifyReportModels(AnalysisContext context) {
-        ModelRegistry<ReportModel> reportRegistry = context.getOrCreateRegistry(ReportModel.class);
-        List<ReportModel> reportModels = reportRegistry.findAll();
-
-        assertThat(reportModels)
-                .as("Report generation should create report models")
-                .isNotEmpty();
-
-        List<String> reportFilenames = reportModels.stream()
-                .map(ReportModel::getReportFilename)
-                .toList();
-
-        assertThat(reportFilenames)
-                .as("Should create index and migration-issues reports")
-                .contains("index.html", "migration-issues.html");
-    }
-
-    private void verifyReportFiles() {
-        Path indexHtml = outputDir.resolve("index.html");
-        Path migrationIssuesHtml = outputDir.resolve("migration-issues.html");
-
-        assertThat(indexHtml)
-                .as("index.html report should be generated")
-                .exists();
-
-        assertThat(migrationIssuesHtml)
-                .as("migration-issues.html report should be generated")
-                .exists();
-
-        // Check CSV export
-        Path csvFile = outputDir.resolve("AllIssues.csv");
-        assertThat(csvFile)
-                .as("CSV export file should be generated")
-                .exists();
     }
 
     // ---------------------------------------------------------------
     // Wiring helpers
     // ---------------------------------------------------------------
 
-    /**
-     * Creates all built-in RuleProvider instances, manually wiring any
-     * dependencies that would normally be handled by CDI.
-     */
     private List<RuleProvider> createBuiltInProviders() {
         List<RuleProvider> providers = new ArrayList<>();
 
-        // Phase.DISCOVERY
         providers.add(new FileDiscoveryProvider());
-
-        // Phase.ARCHIVE_EXTRACTION
         providers.add(new ArchiveExtractionProvider());
 
-        // Phase.INITIAL_ANALYSIS - JavaASTRuleProvider (needs JavaASTParser)
         JavaASTParser parser = new JavaASTParser();
         providers.add(new JavaASTRuleProvider(parser));
 
-        // Phase.INITIAL_ANALYSIS - JavaClassScanProvider
         providers.add(new JavaClassScanProvider());
 
-        // Phase.DECOMPILATION - DecompilationProvider (needs DecompilerService)
         DecompilationProvider decompProvider = createDecompilationProvider();
         providers.add(decompProvider);
 
-        // Phase.REPORT_GENERATION
-        providers.add(new ReportGenerationProvider());
-
-        // Phase.REPORT_RENDERING - ReportRenderingProvider (needs ReportService, CSVExportService)
-        ReportService reportService = new ReportService();
-        CSVExportService csvExportService = new CSVExportService();
-        providers.add(new ReportRenderingProvider(reportService, csvExportService));
+        // Violation output (replaces HTML/CSV reporting)
+        ViolationOutputWriter outputWriter = new ViolationOutputWriter();
+        providers.add(new ViolationOutputProvider(outputWriter));
 
         return providers;
     }
 
-    /**
-     * Creates a DecompilationProvider with a no-op DecompilerService
-     * (no .class files to decompile in a source-only project).
-     */
     private DecompilationProvider createDecompilationProvider() {
         DecompilerService noOpDecompiler = new DecompilerService() {
             @Override
@@ -402,10 +372,6 @@ class EndToEndTest {
         return provider;
     }
 
-    /**
-     * Creates a RuleEngine with the given providers and a RuleProviderSorter,
-     * using reflection to set the CDI-injected fields.
-     */
     private RuleEngine createEngine(List<RuleProvider> providerList) {
         RuleEngine engine = new RuleEngine();
         injectField(engine, "providers", new SimpleInstance<>(providerList));
@@ -414,9 +380,6 @@ class EndToEndTest {
         return engine;
     }
 
-    /**
-     * Resolves a test resource directory path from the classpath.
-     */
     private Path resolveResource(String resourceName) {
         var url = getClass().getClassLoader().getResource(resourceName);
         if (url == null) {
@@ -425,9 +388,6 @@ class EndToEndTest {
         return Path.of(url.getPath());
     }
 
-    /**
-     * Sets a field value on an object using reflection, bypassing access checks.
-     */
     private static void injectField(Object target, String fieldName, Object value) {
         try {
             Field field = findField(target.getClass(), fieldName);
@@ -439,9 +399,6 @@ class EndToEndTest {
         }
     }
 
-    /**
-     * Walks the class hierarchy to find a declared field by name.
-     */
     private static Field findField(Class<?> clazz, String fieldName) throws NoSuchFieldException {
         Class<?> current = clazz;
         while (current != null) {
@@ -459,11 +416,6 @@ class EndToEndTest {
     // Minimal Instance<T> implementation for test wiring
     // ---------------------------------------------------------------
 
-    /**
-     * A minimal {@link Instance} implementation that wraps a fixed list of items.
-     * Used to satisfy CDI {@code @Inject Instance<RuleProvider>} fields in the
-     * RuleEngine without a running CDI container.
-     */
     @SuppressWarnings("unchecked")
     private static class SimpleInstance<T> implements Instance<T> {
         private final List<T> items;

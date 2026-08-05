@@ -12,23 +12,20 @@
 
     <artifactId>windup-reporting</artifactId>
     <name>Windup Reporting</name>
-    <description>Report generation: JSON data, FreeMarker HTML, CSV export</description>
+    <description>Violation output in Konveyor YAML format</description>
 
     <dependencies>
         <dependency>
             <groupId>org.jboss.windup</groupId>
             <artifactId>windup-core</artifactId>
         </dependency>
-        <!-- FreeMarker for HTML reports -->
         <dependency>
-            <groupId>org.freemarker</groupId>
-            <artifactId>freemarker</artifactId>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
-
-        <!-- CSV export -->
         <dependency>
-            <groupId>com.opencsv</groupId>
-            <artifactId>opencsv</artifactId>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
         </dependency>
 
         <!-- Test -->

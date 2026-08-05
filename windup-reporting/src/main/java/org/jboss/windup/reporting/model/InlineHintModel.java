@@ -16,7 +16,9 @@ public class InlineHintModel {
     private String title;
     private String hint;
     private EffortLevel effort;
+    private int effortPoints;
     private Severity severity;
+    private String category;
     private int lineNumber;
     private int columnNumber;
     private final List<LinkModel> links = new ArrayList<>();
@@ -59,12 +61,28 @@ public class InlineHintModel {
         this.effort = effort;
     }
 
+    public int getEffortPoints() {
+        return effortPoints;
+    }
+
+    public void setEffortPoints(int effortPoints) {
+        this.effortPoints = effortPoints;
+    }
+
     public Severity getSeverity() {
         return severity;
     }
 
     public void setSeverity(Severity severity) {
         this.severity = severity;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
     }
 
     public int getLineNumber() {
