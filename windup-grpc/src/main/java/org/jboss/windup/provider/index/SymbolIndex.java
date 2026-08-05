@@ -25,6 +25,7 @@ public class SymbolIndex {
 
     private final List<IndexedSymbol> allSymbols = new CopyOnWriteArrayList<>();
     private final Map<LocationType, List<IndexedSymbol>> byLocation = new EnumMap<>(LocationType.class);
+    private final Set<String> dependencyFileUris = new HashSet<>();
 
     public void indexDirectory(Path root) throws IOException {
         if (!Files.isDirectory(root)) {
@@ -53,6 +54,40 @@ public class SymbolIndex {
         }
 
         LOG.info("Indexed {} symbols across {} files", allSymbols.size(), javaFiles.size());
+    }
+
+    public void indexDependencyDirectory(Path root) throws IOException {
+        if (!Files.isDirectory(root)) {
+            throw new IOException("Not a directory: " + root);
+        }
+
+        List<Path> javaFiles = new ArrayList<>();
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (file.toString().endsWith(".java")) {
+                    javaFiles.add(file);
+                    dependencyFileUris.add(file.toUri().toString());
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+
+        LOG.info("Parsing {} dependency Java files in {}", javaFiles.size(), root);
+
+        for (Path file : javaFiles) {
+            try {
+                indexFile(file);
+            } catch (Exception e) {
+                LOG.warn("Failed to parse dependency file {}: {}", file, e.getMessage());
+            }
+        }
+
+        LOG.info("Indexed {} total symbols (including dependencies)", allSymbols.size());
+    }
+
+    public boolean isDependencyFile(String fileUri) {
+        return dependencyFileUris.contains(fileUri);
     }
 
     public void indexFile(Path file) throws IOException {

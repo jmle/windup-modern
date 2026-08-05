@@ -9,116 +9,76 @@ when implementing some of these.
 
 ---
 
-## 1. Decompilation (FernFlower)
+## ~~1. Decompilation (Vineflower)~~ DONE
 
-**Priority: High**
+**Status: Implemented**
 
-Decompiles `.class` files from JARs/WARs/EARs into `.java` source so they can be analyzed
-for symbol references in dependencies.
+Embedded Vineflower 1.10.1 as a library dependency. Uses `Fernflower` class directly with
+custom `DirectoryResultSaver` (implements `IResultSaver`) to write `.java` files to disk.
+Parallel decompilation via `ExecutorService` worker pool.
 
-**Go implementation:**
-- `dependency/decompile.go` -- worker pool (10 parallel workers), dispatches jobs via channel
-- `dependency/jar.go`, `dependency/war.go`, `dependency/ear.go` -- per-archive-type handlers
-- `dependency/class_decompile_job.go` -- single class decompilation job
-- `dependency/explosion.go` -- archive extraction using `jar -xvf`
-- Runs `java -jar fernflower.jar -mpm=30 <input> <output>` per artifact
-- Decompiled sources stored as `*-sources.jar` alongside binary JARs
-- Supports recursive extraction: EARs contain WARs/JARs, WARs contain JARs in WEB-INF/lib
-
-**Trigger:** During `Init()` when dependencies lack source JARs, and on-demand via
-`GetSourceFileLocation()` when a decompiled source is not yet available.
-
-**Config:** `fernFlowerPath` provider setting (default `/bin/fernflower.jar`).
-
-**Reference code in this repo:**
-- `windup-java/src/main/java/org/jboss/windup/java/decompiler/DecompilerService.java` -- decompiler interface
-- `windup-java/src/main/java/org/jboss/windup/java/decompiler/FallbackDecompiler.java` -- javap fallback
-- `windup-java/src/main/java/org/jboss/windup/java/decompiler/ProcyonDecompiler.java` -- Procyon integration
-- `windup-core/src/main/java/org/jboss/windup/engine/archive/ArchiveExtractionProvider.java` -- ZIP/JAR/WAR/EAR extraction
+**Implementation:**
+- `windup-grpc/.../decompiler/VineflowerDecompiler.java` -- core decompiler with worker pool
+- `windup-grpc/.../decompiler/ArchiveHandler.java` -- JAR/WAR/EAR handlers with recursive extraction
+- `windup-grpc/.../decompiler/DecompilerService.java` -- interface
+- `windup-grpc/.../decompiler/DecompileResult.java` -- result record
 
 ---
 
-## 2. Maven SHA Index Lookup
+## ~~2. Maven SHA Index Lookup~~ DONE
 
-**Priority: High**
+**Status: Implemented**
 
-Identifies unknown JARs by computing their SHA1 hash and performing a binary search
-against a pre-built sorted text index file (`maven-index.txt`). Maps SHA1 hashes to
-Maven coordinates (`groupId:artifactId:packaging:classifier:version`).
+Binary search over sorted text file (`maven-index.txt`) mapping SHA1 → Maven coordinates.
+Uses `RandomAccessFile` for random access. Falls back gracefully when index file not found.
 
-**Go implementation:**
-- `dependency/artifact.go` -- `constructArtifactFromSHA()`, `search()`, `searchIndex()` (binary search)
-- Falls back to `constructArtifactFromPom()` (reads `META-INF/maven/*/*/pom.properties` inside JAR)
-- Last resort: `ToFilePathDependency()` infers coordinates from file path structure
-
-**Trigger:** During decompilation and binary dependency walking.
-
-**Config:** `mavenIndexPath` provider setting.
-
-**Reference code in this repo:**
-- `windup-core/src/main/java/org/jboss/windup/engine/discovery/HashCalculator.java` -- SHA-1/MD5 computation
-- `windup-core/src/main/java/org/jboss/windup/engine/archive/ArchiveIdentifier.java` -- manifest-based identification
+**Implementation:**
+- `windup-grpc/.../buildtool/MavenShaIndex.java` -- binary search, SHA1 computation, coordinate parsing
 
 ---
 
-## 3. Build Tool Abstraction (Maven + Gradle + Binary)
+## ~~3. Build Tool Abstraction (Maven + Gradle + Binary)~~ DONE
 
-**Priority: High**
+**Status: Implemented**
 
-Unified `BuildTool` interface with three implementations that handle dependency resolution,
-source download, and decompile fallback.
+Unified `BuildTool` interface with Maven, Gradle, and Binary implementations. Detection
+priority: Gradle > Maven > Binary (matching Go provider). Runs actual build tool commands
+for transitive dependency resolution.
 
-**Go implementation:**
-- `bldtool/tool.go` -- `BuildTool` interface, `GetBuildTool()` detection (Gradle > Binary > Maven)
-- `bldtool/maven.go` -- Maven: detects `pom.xml`, runs `mvn dependency:tree`
-- `bldtool/gradle.go` -- Gradle: detects `build.gradle`, runs `gradlew dependencies`, subproject support
-- `bldtool/maven_binary.go` -- Binary: detects `.jar/.war/.ear` extension, always resolves
-
-**Key methods per BuildTool:**
-- `GetDependencies()` -- runs build tool commands, parses output into dependency DAG
-- `GetResolver()` -- creates resolver for source download + decompilation
-- `GetSourceFileLocation()` -- resolves `konveyor-jdt://` URIs to actual file paths
-- `GetLocalRepoPath()` -- Maven `.m2/repository` or Gradle `caches/modules-2/files-2.1`
-
-**Current state in windup-grpc:** `DependencyParser.java` does simple XML parsing of `pom.xml`
-and regex parsing of `build.gradle`. Does not run build tool commands or resolve transitive
-dependencies.
+**Implementation:**
+- `windup-grpc/.../buildtool/BuildTool.java` -- interface with `Type` enum and `ResolvedDependency` record
+- `windup-grpc/.../buildtool/BuildToolDetector.java` -- detection logic
+- `windup-grpc/.../buildtool/MavenBuildTool.java` -- runs `mvn dependency:tree`, parses output
+- `windup-grpc/.../buildtool/GradleBuildTool.java` -- runs `gradlew dependencies`, wrapper support
+- `windup-grpc/.../buildtool/BinaryBuildTool.java` -- walks directory for archives
 
 ---
 
-## 4. Dependency Resolution (Source Download + Decompile Fallback)
+## ~~4. Dependency Resolution (Source Download + Decompile Fallback)~~ DONE
 
-**Priority: High**
+**Status: Implemented**
 
-Downloads source JARs for all dependencies. Decompiles those without sources.
+Full pipeline: detect build tool → resolve deps → download source JARs (`mvn dependency:sources`)
+→ decompile missing sources via Vineflower → index all dependency sources.
+`IsDependencyIncident` flag set on incidents from dependency files.
 
-**Go implementation:**
-- `dependency/maven_resolver.go` -- runs `mvn de.qaware.maven:go-offline-maven-plugin:resolve-dependencies -DdownloadSources`
-- `dependency/gradle_resolver.go` -- injects custom `konveyorDownloadSources` Gradle task, handles Gradle 9+ compatibility
-- `dependency/binary_resolver.go` -- decompiles entire binary into synthetic `java-project/`
-- `gradletasks/tasks.go` -- embedded Gradle task definitions for source resolution
-
-**Why it matters:** Without this, the provider cannot analyze code in dependencies. Rules that
-match patterns in third-party libraries (e.g., Spring framework classes) would miss incidents
-where the application extends or overrides dependency code.
+**Implementation:**
+- `windup-grpc/.../buildtool/DependencyResolver.java` -- orchestrates source extraction + decompilation
+- `windup-grpc/.../buildtool/DependencyLabeler.java` -- open-source vs internal classification
+- `windup-grpc/.../index/SymbolIndex.java` -- `indexDependencyDirectory()` and `isDependencyFile()`
+- `windup-grpc/.../WorkspaceContext.java` -- wired into `index()` flow
 
 ---
 
-## 5. WAR/EAR Archive Handling
+## ~~5. WAR/EAR Archive Handling~~ DONE
 
-**Priority: Medium**
+**Status: Implemented**
 
-Full support for exploding and analyzing WAR and EAR enterprise archives.
+JAR/WAR/EAR handlers with recursive extraction. WAR: decompiles WEB-INF/classes, collects
+WEB-INF/lib/*.jar as dependencies. EAR: recursively processes contained JARs/WARs.
 
-**Go implementation:**
-- `dependency/war.go` -- explodes WARs, decompiles `WEB-INF/classes` into `src/main/java`,
-  treats `WEB-INF/lib/*.jar` as dependencies, copies static assets to `src/main/webapp`
-- `dependency/ear.go` -- explodes EARs, recursively processes contained JARs and WARs
-- `dependency/explosion.go` -- uses `jar -xvf` to extract archives
-
-**Reference code in this repo:**
-- `windup-core/src/main/java/org/jboss/windup/engine/archive/ArchiveExtractionProvider.java`
-- `windup-core/src/main/java/org/jboss/windup/model/ArchiveType.java` -- JAR, WAR, EAR, RAR, SAR, ZIP
+**Implementation:**
+- `windup-grpc/.../decompiler/ArchiveHandler.java` -- `handleJar()`, `handleWar()`, `handleEar()`, `explode()`
 
 ---
 
@@ -141,21 +101,17 @@ file paths.
 
 ---
 
-## 7. Dependency Labeling
+## ~~7. Dependency Labeling~~ DONE
 
-**Priority: Medium**
+**Status: Implemented**
 
-Labels each dependency as `konveyor.io/dep-source=open-source` or `internal`, and adds
-`konveyor.io/language=java`. Supports `konveyor.io/exclude` for filtering.
+Labels dependencies as `konveyor.io/dep-source=open-source|internal`, adds
+`konveyor.io/language=java`, supports `konveyor.io/exclude` for filtering.
+Configurable via regex patterns file and exclude packages list.
 
-**Go implementation:**
-- `dependency/labels/labels.go` -- `Labeler` interface, `AddLabels()` method
-- Uses a file of regex patterns (`depOpenSourceLabelsFile`) to classify dependencies
-
-**Config:** `depOpenSourceLabelsFile`, `excludePackages`.
-
-**Why it matters:** The engine uses these labels to scope dependency analysis. Without them,
-the engine cannot distinguish open-source from internal dependencies.
+**Implementation:**
+- `windup-grpc/.../buildtool/DependencyLabeler.java` -- classification logic, config loading
+- `windup-grpc/.../WorkspaceContext.java` -- wired into `getDependenciesFromBuildTool()` response
 
 ---
 
@@ -259,18 +215,18 @@ Configurable timeout for individual rule queries to prevent hangs on pathologica
 
 ---
 
-## Summary by Priority
+## Summary
 
-| Priority | Features |
-|----------|----------|
-| High     | 1. Decompilation, 2. Maven SHA Index, 3. Build Tool Abstraction, 4. Dependency Resolution |
-| Medium   | 5. WAR/EAR Archives, 6. URI Resolution, 7. Dependency Labeling, 10. Bytecode Scanning, 12. Filepath Scoping, 14. Gradle Features |
-| Low      | 8. Remote Artifact Download, 9. Maven Settings, 11. Dependency Caching, 13. Query Timeout |
+| Status | Features |
+|--------|----------|
+| **Done**    | ~~1. Decompilation~~, ~~2. Maven SHA Index~~, ~~3. Build Tool Abstraction~~, ~~4. Dependency Resolution~~, ~~5. WAR/EAR Archives~~, ~~7. Dependency Labeling~~ |
+| **Pending** | 6. URI Resolution (Medium), 10. Bytecode Scanning (Medium), 12. Filepath Scoping (Medium), 14. Gradle Features (Medium) |
+| **Low**     | 8. Remote Artifact Download, 9. Maven Settings, 11. Dependency Caching, 13. Query Timeout |
 
 ## Retained Reference Modules
 
 The following modules are excluded from the Maven build but retained on disk as reference
-for implementing the features above:
+for implementing the remaining features:
 
 - **windup-core/** -- Archive extraction, manifest identification, SHA hashing, archive/file models
 - **windup-java/** -- Decompiler integration (FernFlower/Procyon/javap), bytecode `.class` scanning, Maven POM parsing

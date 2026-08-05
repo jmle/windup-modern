@@ -2,6 +2,10 @@ package org.jboss.windup.provider;
 
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
+import org.jboss.windup.provider.buildtool.BuildTool;
+import org.jboss.windup.provider.buildtool.BuildToolDetector;
+import org.jboss.windup.provider.buildtool.DependencyLabeler;
+import org.jboss.windup.provider.buildtool.DependencyResolver;
 import org.jboss.windup.provider.grpc.*;
 import org.jboss.windup.provider.index.*;
 import org.slf4j.Logger;
@@ -22,6 +26,8 @@ public class WorkspaceContext {
     private final Config config;
     private final int contextLines;
     private final SymbolIndex symbolIndex = new SymbolIndex();
+    private BuildTool buildTool;
+    private List<BuildTool.ResolvedDependency> resolvedDeps;
 
     public WorkspaceContext(long id, String location, String analysisMode, Config config, int contextLines) {
         this.id = id;
@@ -34,7 +40,50 @@ public class WorkspaceContext {
     public void index() throws IOException {
         Path root = Path.of(location);
         symbolIndex.indexDirectory(root);
-        LOG.info("Workspace {} indexed: {} symbols", id, symbolIndex.size());
+        LOG.info("Workspace {} indexed: {} symbols from application source", id, symbolIndex.size());
+
+        buildTool = BuildToolDetector.detect(root);
+        try {
+            resolvedDeps = buildTool.getDependencies(root);
+            LOG.info("Resolved {} dependencies via {} for workspace {}",
+                    resolvedDeps.size(), buildTool.getType(), id);
+        } catch (Exception e) {
+            LOG.warn("Dependency resolution failed, falling back to static parsing: {}", e.getMessage());
+            resolvedDeps = List.of();
+        }
+
+        if (!resolvedDeps.isEmpty() && !"source-only".equals(analysisMode)) {
+            resolveDependencySources(root);
+        }
+    }
+
+    private void resolveDependencySources(Path projectDir) {
+        DependencyResolver resolver = new DependencyResolver();
+
+        if (buildTool.getType() == BuildTool.Type.MAVEN) {
+            resolver.downloadSources(resolvedDeps, projectDir);
+            resolvedDeps = buildTool.getDependencies(projectDir);
+        }
+
+        Path workDir = projectDir.resolve(".windup-work");
+        try {
+            DependencyResolver.ResolveResult result = resolver.resolve(resolvedDeps, workDir);
+            if (!result.sourceDirs().isEmpty()) {
+                indexDependencySources(result.sourceDirs());
+                LOG.info("Indexed {} dependency source directories ({} decompiled)",
+                        result.sourceDirs().size(), result.decompiledCount());
+            }
+        } catch (Exception e) {
+            LOG.warn("Dependency source resolution failed: {}", e.getMessage());
+        }
+    }
+
+    public void indexDependencySources(List<Path> sourceDirs) throws IOException {
+        for (Path dir : sourceDirs) {
+            if (Files.isDirectory(dir)) {
+                symbolIndex.indexDependencyDirectory(dir);
+            }
+        }
     }
 
     public SymbolIndex getSymbolIndex() {
@@ -114,7 +163,8 @@ public class WorkspaceContext {
         for (IndexedSymbol sym : matches) {
             IncidentContext.Builder incident = IncidentContext.newBuilder()
                     .setFileURI(sym.fileUri())
-                    .setLineNumber(sym.line() + 1);
+                    .setLineNumber(sym.line() + 1)
+                    .setIsDependencyIncident(symbolIndex.isDependencyFile(sym.fileUri()));
 
             Struct.Builder vars = Struct.newBuilder()
                     .putFields("kind", Value.newBuilder().setStringValue(sym.kind().label()).build())
@@ -172,6 +222,44 @@ public class WorkspaceContext {
     }
 
     public DependencyResponse getDependencies() {
+        if (resolvedDeps != null && !resolvedDeps.isEmpty()) {
+            return getDependenciesFromBuildTool();
+        }
+        return getDependenciesFromStaticParsing();
+    }
+
+    private DependencyResponse getDependenciesFromBuildTool() {
+        String buildFileUri = Path.of(location, "pom.xml").toUri().toString();
+        DependencyLabeler labeler = new DependencyLabeler();
+
+        DependencyList.Builder depList = DependencyList.newBuilder();
+        for (BuildTool.ResolvedDependency dep : resolvedDeps) {
+            Dependency.Builder d = Dependency.newBuilder()
+                    .setName(dep.name())
+                    .setVersion(dep.version() != null ? dep.version() : "");
+            if (dep.classifier() != null) {
+                d.setClassifier(dep.classifier());
+            }
+
+            Map<String, String> labels = labeler.getLabels(dep);
+            for (Map.Entry<String, String> label : labels.entrySet()) {
+                d.addLabels(label.getKey() + "=" + label.getValue());
+            }
+
+            depList.addDeps(d);
+        }
+
+        DependencyResponse.Builder response = DependencyResponse.newBuilder()
+                .setSuccessful(true)
+                .addFileDep(FileDep.newBuilder()
+                        .setFileURI(buildFileUri)
+                        .setList(depList));
+
+        LOG.info("Returning {} resolved dependencies from {}", resolvedDeps.size(), buildTool.getType());
+        return response.build();
+    }
+
+    private DependencyResponse getDependenciesFromStaticParsing() {
         DependencyParser parser = new DependencyParser();
         List<DependencyParser.ParsedDependency> deps = parser.parseDirectory(Path.of(location));
 
@@ -199,7 +287,15 @@ public class WorkspaceContext {
                     .setList(depList));
         }
 
-        LOG.info("Parsed {} dependencies from {}", deps.size(), location);
+        LOG.info("Parsed {} dependencies from static analysis of {}", deps.size(), location);
         return response.build();
+    }
+
+    public BuildTool getBuildTool() {
+        return buildTool;
+    }
+
+    public List<BuildTool.ResolvedDependency> getResolvedDeps() {
+        return resolvedDeps != null ? resolvedDeps : List.of();
     }
 }

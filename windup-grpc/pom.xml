@@ -21,6 +21,7 @@
         <version.protobuf-plugin>0.6.1</version.protobuf-plugin>
         <version.snakeyaml>2.2</version.snakeyaml>
         <version.eclipse.jdt>3.38.0</version.eclipse.jdt>
+        <version.vineflower>1.10.1</version.vineflower>
     </properties>
 
     <dependencies>
@@ -94,6 +95,13 @@
             <version>${version.javax.annotation}</version>
         </dependency>
 
+        <!-- Decompiler -->
+        <dependency>
+            <groupId>org.vineflower</groupId>
+            <artifactId>vineflower</artifactId>
+            <version>${version.vineflower}</version>
+        </dependency>
+
         <!-- YAML parsing for condition info -->
         <dependency>
             <groupId>org.yaml</groupId>
@@ -122,6 +130,12 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${version.grpc}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
