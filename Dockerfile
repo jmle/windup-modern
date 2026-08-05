@@ -4,20 +4,12 @@ USER 0
 WORKDIR /build
 
 COPY pom.xml .
-COPY windup-core/pom.xml windup-core/pom.xml
-COPY windup-java/pom.xml windup-java/pom.xml
-COPY windup-rules/pom.xml windup-rules/pom.xml
-COPY windup-reporting/pom.xml windup-reporting/pom.xml
-COPY windup-cli/pom.xml windup-cli/pom.xml
+COPY windup-bom/pom.xml windup-bom/pom.xml
 COPY windup-grpc/pom.xml windup-grpc/pom.xml
 
 RUN mvn dependency:go-offline -pl windup-grpc -am -q || true
 
-COPY windup-core/ windup-core/
-COPY windup-java/ windup-java/
-COPY windup-rules/ windup-rules/
-COPY windup-reporting/ windup-reporting/
-COPY windup-cli/ windup-cli/
+COPY windup-bom/ windup-bom/
 COPY windup-grpc/ windup-grpc/
 
 RUN mvn package -pl windup-grpc -am -DskipTests -q

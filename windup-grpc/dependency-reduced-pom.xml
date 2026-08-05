@@ -113,9 +113,10 @@
     </dependency>
   </dependencies>
   <properties>
+    <version.eclipse.jdt>3.38.0</version.eclipse.jdt>
     <version.protobuf-plugin>0.6.1</version.protobuf-plugin>
-    <version.snakeyaml>2.2</version.snakeyaml>
     <version.javax.annotation>1.3.2</version.javax.annotation>
+    <version.snakeyaml>2.2</version.snakeyaml>
     <version.protobuf>3.25.5</version.protobuf>
     <version.grpc>1.68.0</version.grpc>
   </properties>

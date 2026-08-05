@@ -9,19 +9,10 @@
     <version>7.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>Windup BOM</name>
-    <description>Bill of Materials for Windup modules and third-party dependencies</description>
+    <description>Bill of Materials for Windup dependencies</description>
 
     <properties>
-        <version.jackson>2.17.2</version.jackson>
-        <version.freemarker>2.3.33</version.freemarker>
         <version.eclipse.jdt>3.38.0</version.eclipse.jdt>
-        <version.lucene>9.11.1</version.lucene>
-        <version.commons-io>2.16.1</version.commons-io>
-        <version.commons-lang3>3.14.0</version.commons-lang3>
-        <version.commons-compress>1.26.2</version.commons-compress>
-        <version.opencsv>5.9</version.opencsv>
-        <version.saxon>12.5</version.saxon>
-        <version.jsoup>1.18.1</version.jsoup>
         <version.junit5>5.10.3</version.junit5>
         <version.assertj>3.26.3</version.assertj>
     </properties>
@@ -31,95 +22,15 @@
             <!-- Windup modules -->
             <dependency>
                 <groupId>org.jboss.windup</groupId>
-                <artifactId>windup-core</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jboss.windup</groupId>
-                <artifactId>windup-java</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jboss.windup</groupId>
-                <artifactId>windup-rules</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jboss.windup</groupId>
-                <artifactId>windup-reporting</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jboss.windup</groupId>
-                <artifactId>windup-cli</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jboss.windup</groupId>
                 <artifactId>windup-grpc</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
-            <!-- Third-party -->
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-databind</artifactId>
-                <version>${version.jackson}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson.dataformat</groupId>
-                <artifactId>jackson-dataformat-yaml</artifactId>
-                <version>${version.jackson}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.freemarker</groupId>
-                <artifactId>freemarker</artifactId>
-                <version>${version.freemarker}</version>
-            </dependency>
+            <!-- Eclipse JDT -->
             <dependency>
                 <groupId>org.eclipse.jdt</groupId>
                 <artifactId>org.eclipse.jdt.core</artifactId>
                 <version>${version.eclipse.jdt}</version>
-            </dependency>
-            <dependency>
-                <groupId>commons-io</groupId>
-                <artifactId>commons-io</artifactId>
-                <version>${version.commons-io}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.commons</groupId>
-                <artifactId>commons-lang3</artifactId>
-                <version>${version.commons-lang3}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.commons</groupId>
-                <artifactId>commons-compress</artifactId>
-                <version>${version.commons-compress}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.opencsv</groupId>
-                <artifactId>opencsv</artifactId>
-                <version>${version.opencsv}</version>
-            </dependency>
-            <dependency>
-                <groupId>net.sf.saxon</groupId>
-                <artifactId>Saxon-HE</artifactId>
-                <version>${version.saxon}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jsoup</groupId>
-                <artifactId>jsoup</artifactId>
-                <version>${version.jsoup}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.lucene</groupId>
-                <artifactId>lucene-core</artifactId>
-                <version>${version.lucene}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.lucene</groupId>
-                <artifactId>lucene-queryparser</artifactId>
-                <version>${version.lucene}</version>
             </dependency>
 
             <!-- Test -->
