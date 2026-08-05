@@ -1,0 +1,38 @@
+FROM registry.access.redhat.com/ubi9/openjdk-17:latest as builder
+
+USER 0
+WORKDIR /build
+
+COPY pom.xml .
+COPY windup-core/pom.xml windup-core/pom.xml
+COPY windup-java/pom.xml windup-java/pom.xml
+COPY windup-rules/pom.xml windup-rules/pom.xml
+COPY windup-reporting/pom.xml windup-reporting/pom.xml
+COPY windup-cli/pom.xml windup-cli/pom.xml
+COPY windup-grpc/pom.xml windup-grpc/pom.xml
+
+RUN mvn dependency:go-offline -pl windup-grpc -am -q || true
+
+COPY windup-core/ windup-core/
+COPY windup-java/ windup-java/
+COPY windup-rules/ windup-rules/
+COPY windup-reporting/ windup-reporting/
+COPY windup-cli/ windup-cli/
+COPY windup-grpc/ windup-grpc/
+
+RUN mvn package -pl windup-grpc -am -DskipTests -q
+
+FROM registry.access.redhat.com/ubi9/openjdk-17-runtime:latest
+
+USER 0
+WORKDIR /addon
+
+COPY --from=builder /build/windup-grpc/target/windup-grpc-7.0.0-SNAPSHOT.jar /usr/local/bin/java-provider.jar
+
+RUN chgrp -R 0 /addon && chmod -R g=u /addon
+USER 1001
+
+ENV HOME=/addon
+EXPOSE 14651
+
+ENTRYPOINT ["java", "-jar", "/usr/local/bin/java-provider.jar", "--port", "14651"]

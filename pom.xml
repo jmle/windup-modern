@@ -48,6 +48,7 @@
         <module>windup-rules</module>
         <module>windup-reporting</module>
         <module>windup-cli</module>
+        <module>windup-grpc</module>
     </modules>
 
     <dependencyManagement>
