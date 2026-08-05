@@ -147,8 +147,8 @@ class EndToEndTest {
                 .isNotEmpty();
 
         assertThat(javaSourceFiles)
-                .as("Should discover exactly 4 Java source files")
-                .hasSize(4);
+                .as("Should discover exactly 5 Java source files")
+                .hasSize(5);
 
         List<String> javaFileNames = javaSourceFiles.stream()
                 .map(FileModel::getFileName)
@@ -159,7 +159,8 @@ class EndToEndTest {
                         "DemoApplication.java",
                         "HelloService.java",
                         "AppConfig.java",
-                        "LocationTestService.java");
+                        "LocationTestService.java",
+                        "AnotherTestService.java");
     }
 
     private void verifyJavaClassModels(AnalysisContext context) {
@@ -180,7 +181,8 @@ class EndToEndTest {
                         "com.example.demo.DemoApplication",
                         "com.example.demo.HelloService",
                         "com.example.demo.config.AppConfig",
-                        "com.example.demo.LocationTestService");
+                        "com.example.demo.LocationTestService",
+                        "com.example.demo.AnotherTestService");
     }
 
     private void verifyJavaClassReferences(AnalysisContext context) {
@@ -260,6 +262,16 @@ class EndToEndTest {
                     .as("Location rule '%s' should produce at least one hint", ruleId)
                     .anyMatch(h -> ruleIdContains(h, ruleId));
         }
+
+        // --- Star import resolution ---
+
+        List<InlineHintModel> annotationHintsForAnotherService = hints.stream()
+                .filter(h -> ruleIdContains(h, "test-annotation"))
+                .filter(h -> h.getSourceFile().getFileName().equals("AnotherTestService.java"))
+                .toList();
+        assertThat(annotationHintsForAnotherService)
+                .as("Star-imported @LegacyAnnotation in AnotherTestService should be detected")
+                .isNotEmpty();
 
         // --- Cross-checks ---
 

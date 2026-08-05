@@ -53,6 +53,7 @@ public class TypeReferenceCollector extends ASTVisitor {
     private final FileModel sourceFile;
     private final List<JavaClassReference> references = new ArrayList<>();
     private final Map<String, String> importMap = new HashMap<>();
+    private final List<String> starImportPackages = new ArrayList<>();
 
     public TypeReferenceCollector(CompilationUnit compilationUnit, FileModel sourceFile) {
         this.compilationUnit = compilationUnit;
@@ -64,6 +65,7 @@ public class TypeReferenceCollector extends ASTVisitor {
     private void buildImportMap() {
         for (ImportDeclaration imp : (List<ImportDeclaration>) compilationUnit.imports()) {
             if (imp.isOnDemand()) {
+                starImportPackages.add(imp.getName().getFullyQualifiedName());
                 continue;
             }
             String fqn = imp.getName().getFullyQualifiedName();
@@ -72,11 +74,20 @@ public class TypeReferenceCollector extends ASTVisitor {
         }
     }
 
-    private String resolveTypeName(String name) {
+    private List<String> resolveTypeName(String name) {
         if (name.contains(".")) {
-            return name;
+            return List.of(name);
         }
-        return importMap.getOrDefault(name, name);
+        String explicit = importMap.get(name);
+        if (explicit != null) {
+            return List.of(explicit);
+        }
+        if (!starImportPackages.isEmpty()) {
+            return starImportPackages.stream()
+                    .map(pkg -> pkg + "." + name)
+                    .toList();
+        }
+        return List.of(name);
     }
 
     public List<JavaClassReference> getReferences() {
@@ -207,12 +218,12 @@ public class TypeReferenceCollector extends ASTVisitor {
 
     @Override
     public boolean visit(MethodInvocation node) {
-        // Without binding resolution we record the method name and
-        // expression type if available.
         if (node.getExpression() != null) {
-            String expr = resolveTypeName(node.getExpression().toString());
-            String methodCall = expr + "." + node.getName().getIdentifier();
-            addReference(methodCall, ReferenceType.METHOD_CALL, node.getStartPosition());
+            List<String> exprs = resolveTypeName(node.getExpression().toString());
+            for (String expr : exprs) {
+                String methodCall = expr + "." + node.getName().getIdentifier();
+                addReference(methodCall, ReferenceType.METHOD_CALL, node.getStartPosition());
+            }
         } else {
             addReference(node.getName().getIdentifier(), ReferenceType.METHOD_CALL,
                     node.getName().getStartPosition());
@@ -279,16 +290,20 @@ public class TypeReferenceCollector extends ASTVisitor {
     // ------------------------------------------------------------------
 
     private void addAnnotationReference(Annotation annotation) {
-        String name = resolveTypeName(annotation.getTypeName().getFullyQualifiedName());
-        addReference(name, ReferenceType.ANNOTATION, annotation.getStartPosition());
+        List<String> names = resolveTypeName(annotation.getTypeName().getFullyQualifiedName());
+        for (String name : names) {
+            addReference(name, ReferenceType.ANNOTATION, annotation.getStartPosition());
+        }
     }
 
     private void addTypeReference(Type type, ReferenceType refType) {
         if (type == null) {
             return;
         }
-        String name = resolveTypeName(JavaASTParser.typeToString(type));
-        addReference(name, refType, type.getStartPosition());
+        List<String> names = resolveTypeName(JavaASTParser.typeToString(type));
+        for (String name : names) {
+            addReference(name, refType, type.getStartPosition());
+        }
     }
 
     private void addReference(String qualifiedName, ReferenceType refType, int startPosition) {
