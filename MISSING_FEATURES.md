@@ -4,9 +4,6 @@ This document catalogs features present in the Go-based Konveyor Java external p
 (`analyzer-lsp/external-providers/java-external-provider`) that are not yet implemented in
 `windup-grpc`. These features are required for production parity.
 
-Reference code in `windup-core/` and `windup-java/` (excluded from the build) may be useful
-when implementing some of these.
-
 ---
 
 ## ~~1. Decompilation (Vineflower)~~ DONE
@@ -155,10 +152,6 @@ refs, method refs) without full decompilation. Faster than decompilation for ini
 **Go implementation:** Not directly in the Go provider (JDTLS handles this). But useful as a
 complement/alternative to decompilation for quick dependency scanning.
 
-**Reference code in this repo:**
-- `windup-java/src/main/java/org/jboss/windup/java/scan/ClassFileScanner.java`
-- `windup-java/src/main/java/org/jboss/windup/java/scan/ClassFileScanResult.java`
-
 ---
 
 ## 11. Dependency Caching
@@ -223,10 +216,3 @@ Configurable timeout for individual rule queries to prevent hangs on pathologica
 | **Pending** | 6. URI Resolution (Medium), 10. Bytecode Scanning (Medium), 12. Filepath Scoping (Medium), 14. Gradle Features (Medium) |
 | **Low**     | 8. Remote Artifact Download, 9. Maven Settings, 11. Dependency Caching, 13. Query Timeout |
 
-## Retained Reference Modules
-
-The following modules are excluded from the Maven build but retained on disk as reference
-for implementing the remaining features:
-
-- **windup-core/** -- Archive extraction, manifest identification, SHA hashing, archive/file models
-- **windup-java/** -- Decompiler integration (FernFlower/Procyon/javap), bytecode `.class` scanning, Maven POM parsing
