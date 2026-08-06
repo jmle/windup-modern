@@ -19,7 +19,7 @@ class DependencyLabelerTest {
     void shouldLabelAsOpenSourceByDefault() {
         DependencyLabeler labeler = new DependencyLabeler();
         BuildTool.ResolvedDependency dep = new BuildTool.ResolvedDependency(
-                "org.springframework", "spring-core", "5.3.20", null, "compile", null, false);
+                "org.springframework", "spring-core", "5.3.20", null, "compile", null, false, false, null);
 
         Map<String, String> labels = labeler.getLabels(dep);
 
@@ -34,7 +34,7 @@ class DependencyLabelerTest {
         DependencyLabeler labeler = new DependencyLabeler(patterns, Set.of());
 
         BuildTool.ResolvedDependency dep = new BuildTool.ResolvedDependency(
-                "com.internal", "my-lib", "1.0", null, "compile", null, false);
+                "com.internal", "my-lib", "1.0", null, "compile", null, false, false, null);
 
         Map<String, String> labels = labeler.getLabels(dep);
 
@@ -46,7 +46,7 @@ class DependencyLabelerTest {
         DependencyLabeler labeler = new DependencyLabeler(List.of(), Set.of("com.excluded"));
 
         BuildTool.ResolvedDependency dep = new BuildTool.ResolvedDependency(
-                "com.excluded.internal", "my-lib", "1.0", null, "compile", null, false);
+                "com.excluded.internal", "my-lib", "1.0", null, "compile", null, false, false, null);
 
         Map<String, String> labels = labeler.getLabels(dep);
 

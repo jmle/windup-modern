@@ -45,7 +45,9 @@ public class BinaryBuildTool implements BuildTool {
                             null,
                             "compile",
                             jar,
-                            false
+                            false,
+                            false,
+                            null
                     ));
                 });
         } catch (IOException e) {

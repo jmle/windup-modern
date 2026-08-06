@@ -12,9 +12,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
 
+import org.apache.maven.artifact.versioning.ComparableVersion;
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * Holds the analysis state for a single initialized workspace. On {@link #index()}, it parses
@@ -99,6 +102,9 @@ public class WorkspaceContext {
     public ProviderEvaluateResponse evaluate(String cap, String conditionInfo) {
         if ("referenced".equals(cap)) {
             return evaluateReferenced(conditionInfo);
+        }
+        if ("dependency".equals(cap)) {
+            return evaluateDependency(conditionInfo);
         }
         LOG.warn("Unknown capability: {}", cap);
         return ProviderEvaluateResponse.newBuilder()
@@ -227,6 +233,89 @@ public class WorkspaceContext {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
+    private ProviderEvaluateResponse evaluateDependency(String conditionInfo) {
+        Yaml yaml = new Yaml();
+        Map<String, Object> cond = yaml.load(conditionInfo);
+        Map<String, Object> depCond = (Map<String, Object>) cond.get("dependency");
+
+        if (depCond == null || resolvedDeps == null || resolvedDeps.isEmpty()) {
+            return ProviderEvaluateResponse.newBuilder().setMatched(false).build();
+        }
+
+        String nameExact = (String) depCond.get("name");
+        String nameRegex = (String) depCond.get("name_regex");
+        String lowerbound = (String) depCond.get("lowerbound");
+        String upperbound = (String) depCond.get("upperbound");
+
+        Pattern namePattern = null;
+        if (nameRegex != null) {
+            namePattern = Pattern.compile(nameRegex);
+        }
+
+        String buildFile = buildTool.getType() == BuildTool.Type.GRADLE
+                ? "build.gradle" : "pom.xml";
+        String buildFileUri = Path.of(location, buildFile).toUri().toString();
+
+        ProviderEvaluateResponse.Builder response = ProviderEvaluateResponse.newBuilder();
+        List<IncidentContext> incidents = new ArrayList<>();
+
+        for (BuildTool.ResolvedDependency dep : resolvedDeps) {
+            if (!matchesName(dep, nameExact, namePattern)) continue;
+            if (!matchesVersionBounds(dep.version(), lowerbound, upperbound)) continue;
+
+            Struct.Builder vars = Struct.newBuilder()
+                    .putFields("name", Value.newBuilder().setStringValue(dep.name()).build())
+                    .putFields("version", Value.newBuilder().setStringValue(
+                            dep.version() != null ? dep.version() : "").build())
+                    .putFields("groupId", Value.newBuilder().setStringValue(dep.groupId()).build())
+                    .putFields("artifactId", Value.newBuilder().setStringValue(dep.artifactId()).build());
+
+            IncidentContext.Builder incident = IncidentContext.newBuilder()
+                    .setFileURI(buildFileUri)
+                    .setLineNumber(0)
+                    .setVariables(vars);
+
+            incidents.add(incident.build());
+        }
+
+        if (incidents.isEmpty()) {
+            return response.setMatched(false).build();
+        }
+
+        response.setMatched(true);
+        incidents.forEach(response::addIncidentContexts);
+        return response.build();
+    }
+
+    private boolean matchesName(BuildTool.ResolvedDependency dep, String nameExact, Pattern namePattern) {
+        String depName = dep.name();
+        if (nameExact != null) {
+            return depName.equals(nameExact);
+        }
+        if (namePattern != null) {
+            return namePattern.matcher(depName).matches();
+        }
+        return true;
+    }
+
+    private boolean matchesVersionBounds(String version, String lowerbound, String upperbound) {
+        if (version == null || version.isEmpty()) return true;
+        if (lowerbound == null && upperbound == null) return true;
+
+        ComparableVersion depVersion = new ComparableVersion(version);
+
+        if (lowerbound != null) {
+            ComparableVersion lower = new ComparableVersion(lowerbound);
+            if (depVersion.compareTo(lower) < 0) return false;
+        }
+        if (upperbound != null) {
+            ComparableVersion upper = new ComparableVersion(upperbound);
+            if (depVersion.compareTo(upper) > 0) return false;
+        }
+        return true;
+    }
+
     public DependencyResponse getDependencies() {
         if (resolvedDeps != null && !resolvedDeps.isEmpty()) {
             return getDependenciesFromBuildTool();
@@ -242,10 +331,23 @@ public class WorkspaceContext {
         for (BuildTool.ResolvedDependency dep : resolvedDeps) {
             Dependency.Builder d = Dependency.newBuilder()
                     .setName(dep.name())
-                    .setVersion(dep.version() != null ? dep.version() : "");
+                    .setVersion(dep.version() != null ? dep.version() : "")
+                    .setIndirect(dep.indirect());
+
             if (dep.classifier() != null) {
                 d.setClassifier(dep.classifier());
             }
+
+            Struct.Builder extras = Struct.newBuilder()
+                    .putFields("groupId", Value.newBuilder().setStringValue(dep.groupId()).build())
+                    .putFields("artifactId", Value.newBuilder().setStringValue(dep.artifactId()).build());
+
+            if (dep.pomPath() != null) {
+                extras.putFields("pomPath", Value.newBuilder().setStringValue(dep.pomPath()).build());
+                d.setFileURIPrefix(Path.of(dep.pomPath()).toUri().toString());
+            }
+
+            d.setExtras(extras);
 
             Map<String, String> labels = labeler.getLabels(dep);
             for (Map.Entry<String, String> label : labels.entrySet()) {

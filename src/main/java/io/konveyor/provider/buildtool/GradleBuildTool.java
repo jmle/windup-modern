@@ -55,7 +55,7 @@ public class GradleBuildTool implements BuildTool {
                         && Files.exists(jarPath.getParent().getParent().resolve(
                                 findSourceHash(jarPath, version)));
 
-                deps.add(new ResolvedDependency(groupId, artifactId, version, null, "compile", jarPath, false));
+                deps.add(new ResolvedDependency(groupId, artifactId, version, null, "compile", jarPath, false, false, null));
             }
         }
 

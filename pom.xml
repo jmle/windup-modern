@@ -24,6 +24,8 @@
         <version.eclipse.jdt>3.38.0</version.eclipse.jdt>
         <version.vineflower>1.10.1</version.vineflower>
         <version.slf4j>2.0.13</version.slf4j>
+        <version.maven>3.9.9</version.maven>
+        <version.maven-resolver>1.9.22</version.maven-resolver>
         <version.junit5>5.10.3</version.junit5>
         <version.assertj>3.26.3</version.assertj>
 
@@ -107,6 +109,23 @@
             <groupId>org.vineflower</groupId>
             <artifactId>vineflower</artifactId>
             <version>${version.vineflower}</version>
+        </dependency>
+
+        <!-- Maven Resolver (embedded dependency resolution) -->
+        <dependency>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-resolver-provider</artifactId>
+            <version>${version.maven}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-connector-basic</artifactId>
+            <version>${version.maven-resolver}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-transport-http</artifactId>
+            <version>${version.maven-resolver}</version>
         </dependency>
 
         <!-- YAML parsing for condition info -->

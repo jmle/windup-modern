@@ -25,7 +25,9 @@ public interface BuildTool {
             String classifier,
             String scope,
             Path jarPath,
-            boolean hasSourceJar
+            boolean hasSourceJar,
+            boolean indirect,
+            String pomPath
     ) {
         public String name() {
             return groupId + "." + artifactId;

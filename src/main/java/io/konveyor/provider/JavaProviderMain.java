@@ -38,10 +38,12 @@ public class JavaProviderMain {
 
         JavaProviderService providerService = new JavaProviderService(contextLines);
         CodeSnipService codeSnipService = new CodeSnipService(contextLines);
+        DependencyLocationService depLocationService = new DependencyLocationService();
 
         Server server = ServerBuilder.forPort(port)
                 .addService(providerService)
                 .addService(codeSnipService)
+                .addService(depLocationService)
                 .addService(ProtoReflectionService.newInstance())
                 .build();
 

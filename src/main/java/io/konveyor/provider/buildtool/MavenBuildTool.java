@@ -1,32 +1,45 @@
 package io.konveyor.provider.buildtool;
 
+import org.apache.maven.model.Model;
+import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
+import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
+import org.eclipse.aether.DefaultRepositorySystemSession;
+import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.artifact.Artifact;
+import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.collection.CollectRequest;
+import org.eclipse.aether.collection.CollectResult;
+import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory;
+import org.eclipse.aether.graph.Dependency;
+import org.eclipse.aether.graph.DependencyNode;
+import org.eclipse.aether.impl.DefaultServiceLocator;
+import org.eclipse.aether.repository.LocalRepository;
+import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.spi.connector.RepositoryConnectorFactory;
+import org.eclipse.aether.spi.connector.transport.TransporterFactory;
+import org.eclipse.aether.transport.http.HttpTransporterFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * Maven {@link BuildTool} implementation. Runs {@code mvn dependency:tree} to resolve the
- * full transitive dependency graph, then maps each artifact to its JAR in
- * {@code ~/.m2/repository}. Skips test-scoped dependencies.
+ * Maven {@link BuildTool} implementation using the embedded Maven Resolver API. Parses
+ * {@code pom.xml} and resolves the full transitive dependency graph in-process, without
+ * requiring an external {@code mvn} binary. Maps each artifact to its JAR in the local
+ * Maven repository. Skips test-scoped dependencies.
  */
 public class MavenBuildTool implements BuildTool {
 
     private static final Logger LOG = LoggerFactory.getLogger(MavenBuildTool.class);
 
-    private static final Pattern DEP_TREE_LINE = Pattern.compile(
-            "[|+\\-\\\\ ]*([\\w.\\-]+):([\\w.\\-]+):(\\w+)(?::([\\w.\\-]+))?:([\\w.\\-]+):([\\w.\\-]+)");
-
-    private static final int TIMEOUT_MINUTES = 10;
+    private static final RemoteRepository MAVEN_CENTRAL = new RemoteRepository.Builder(
+            "central", "default", "https://repo.maven.apache.org/maven2/").build();
 
     @Override
     public Type getType() {
@@ -35,35 +48,126 @@ public class MavenBuildTool implements BuildTool {
 
     @Override
     public List<ResolvedDependency> getDependencies(Path projectDir) {
-        List<String> depTreeOutput = runMvnDependencyTree(projectDir);
-        if (depTreeOutput.isEmpty()) {
+        Path pomFile = projectDir.resolve("pom.xml");
+        if (!Files.exists(pomFile)) {
+            LOG.warn("No pom.xml found in {}", projectDir);
             return List.of();
         }
 
-        Path localRepo = getLocalRepoPath();
-        List<ResolvedDependency> deps = new ArrayList<>();
+        try {
+            Model model = parsePom(pomFile);
+            if (model.getDependencies().isEmpty()) {
+                return List.of();
+            }
 
-        for (String line : depTreeOutput) {
-            Matcher m = DEP_TREE_LINE.matcher(line);
-            if (m.find()) {
-                String groupId = m.group(1);
-                String artifactId = m.group(2);
-                String packaging = m.group(3);
-                String classifier = m.group(4);
-                String version = m.group(5);
-                String scope = m.group(6);
+            String pomPath = pomFile.toAbsolutePath().toString();
+            RepositorySystem repoSystem = newRepositorySystem();
+            DefaultRepositorySystemSession session = newSession(repoSystem);
+            List<RemoteRepository> remoteRepos = buildRemoteRepos(model);
 
-                if ("test".equals(scope)) continue;
+            CollectRequest collectRequest = new CollectRequest();
+            collectRequest.setRepositories(remoteRepos);
 
-                Path jarPath = resolveJarPath(localRepo, groupId, artifactId, version, classifier, packaging);
-                boolean hasSource = jarPath != null && Files.exists(sourceJarPath(jarPath));
+            for (org.apache.maven.model.Dependency modelDep : model.getDependencies()) {
+                if ("test".equals(modelDep.getScope())) continue;
 
-                deps.add(new ResolvedDependency(groupId, artifactId, version, classifier, scope, jarPath, hasSource));
+                String coords = modelDep.getGroupId() + ":" + modelDep.getArtifactId()
+                        + ":" + (modelDep.getType() != null ? modelDep.getType() : "jar")
+                        + (modelDep.getClassifier() != null ? ":" + modelDep.getClassifier() : "")
+                        + ":" + (modelDep.getVersion() != null ? modelDep.getVersion() : "RELEASE");
+
+                Artifact artifact = new DefaultArtifact(coords);
+                Dependency dep = new Dependency(artifact,
+                        modelDep.getScope() != null ? modelDep.getScope() : "compile");
+                collectRequest.addDependency(dep);
+            }
+
+            CollectResult collectResult = repoSystem.collectDependencies(session, collectRequest);
+            DependencyNode root = collectResult.getRoot();
+
+            List<ResolvedDependency> deps = new ArrayList<>();
+            Path localRepo = getLocalRepoPath();
+
+            for (DependencyNode directChild : root.getChildren()) {
+                addDependency(directChild, localRepo, pomPath, false, deps);
+
+                for (DependencyNode transitiveChild : directChild.getChildren()) {
+                    collectTransitive(transitiveChild, localRepo, pomPath, deps);
+                }
+            }
+
+            LOG.info("Resolved {} Maven dependencies from {}", deps.size(), projectDir);
+            return deps;
+
+        } catch (Exception e) {
+            LOG.error("Failed to resolve Maven dependencies in {}", projectDir, e);
+            return List.of();
+        }
+    }
+
+    private void collectTransitive(DependencyNode node, Path localRepo, String pomPath,
+                                   List<ResolvedDependency> deps) {
+        addDependency(node, localRepo, pomPath, true, deps);
+        for (DependencyNode child : node.getChildren()) {
+            collectTransitive(child, localRepo, pomPath, deps);
+        }
+    }
+
+    private void addDependency(DependencyNode node, Path localRepo, String pomPath,
+                               boolean indirect, List<ResolvedDependency> deps) {
+        Artifact artifact = node.getArtifact();
+        if (artifact == null) return;
+
+        String scope = node.getDependency() != null ? node.getDependency().getScope() : "compile";
+        if ("test".equals(scope)) return;
+
+        String groupId = artifact.getGroupId();
+        String artifactId = artifact.getArtifactId();
+        String version = artifact.getVersion();
+        String classifier = artifact.getClassifier().isEmpty() ? null : artifact.getClassifier();
+        String extension = artifact.getExtension();
+
+        Path jarPath = resolveJarPath(localRepo, groupId, artifactId, version, classifier, extension);
+        boolean hasSource = jarPath != null && Files.exists(sourceJarPath(jarPath));
+
+        deps.add(new ResolvedDependency(
+                groupId, artifactId, version, classifier, scope, jarPath, hasSource,
+                indirect, pomPath));
+    }
+
+    private Model parsePom(Path pomFile) throws Exception {
+        MavenXpp3Reader reader = new MavenXpp3Reader();
+        try (var fr = new FileReader(pomFile.toFile())) {
+            return reader.read(fr);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private RepositorySystem newRepositorySystem() {
+        DefaultServiceLocator locator = MavenRepositorySystemUtils.newServiceLocator();
+        locator.addService(RepositoryConnectorFactory.class, BasicRepositoryConnectorFactory.class);
+        locator.addService(TransporterFactory.class, HttpTransporterFactory.class);
+        return locator.getService(RepositorySystem.class);
+    }
+
+    @SuppressWarnings("deprecation")
+    private DefaultRepositorySystemSession newSession(RepositorySystem system) {
+        DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
+        LocalRepository localRepo = new LocalRepository(getLocalRepoPath().toFile());
+        session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
+        return session;
+    }
+
+    private List<RemoteRepository> buildRemoteRepos(Model model) {
+        List<RemoteRepository> repos = new ArrayList<>();
+        if (model.getRepositories() != null) {
+            for (org.apache.maven.model.Repository repo : model.getRepositories()) {
+                repos.add(new RemoteRepository.Builder(
+                        repo.getId(), "default", repo.getUrl()).build());
             }
         }
-
-        LOG.info("Resolved {} Maven dependencies from {}", deps.size(), projectDir);
-        return deps;
+        repos.add(MAVEN_CENTRAL);
+        return repos;
     }
 
     @Override
@@ -73,64 +177,6 @@ public class MavenBuildTool implements BuildTool {
             return Path.of(m2Repo);
         }
         return Path.of(System.getProperty("user.home"), ".m2", "repository");
-    }
-
-    List<String> runMvnDependencyTree(Path projectDir) {
-        String mvnCmd = findMvnCommand();
-        List<String> command = List.of(mvnCmd, "dependency:tree", "-DoutputType=text", "-q");
-
-        try {
-            ProcessBuilder pb = new ProcessBuilder(command)
-                    .directory(projectDir.toFile())
-                    .redirectErrorStream(false);
-
-            Process process = pb.start();
-            List<String> output = new ArrayList<>();
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.add(line);
-                }
-            }
-
-            try (BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = errReader.readLine()) != null) {
-                    LOG.debug("[mvn stderr] {}", line);
-                }
-            }
-
-            boolean finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES);
-            if (!finished) {
-                process.destroyForcibly();
-                LOG.error("mvn dependency:tree timed out after {} minutes", TIMEOUT_MINUTES);
-                return List.of();
-            }
-
-            if (process.exitValue() != 0) {
-                LOG.warn("mvn dependency:tree exited with code {} for {}", process.exitValue(), projectDir);
-            }
-
-            return output;
-        } catch (IOException e) {
-            LOG.error("Failed to run mvn dependency:tree in {}", projectDir, e);
-            return List.of();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return List.of();
-        }
-    }
-
-    private String findMvnCommand() {
-        String mvnHome = System.getenv("MAVEN_HOME");
-        if (mvnHome != null) {
-            Path mvn = Path.of(mvnHome, "bin", "mvn");
-            if (Files.isExecutable(mvn)) return mvn.toString();
-        }
-        Path wrapper = Path.of("mvnw");
-        if (Files.isExecutable(wrapper)) return "./mvnw";
-        return "mvn";
     }
 
     static Path resolveJarPath(Path localRepo, String groupId, String artifactId,
