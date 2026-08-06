@@ -10,6 +10,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
+/**
+ * {@link BuildTool} for standalone binary archives. Walks the project directory for
+ * {@code .jar/.war/.ear} files and treats each as an embedded dependency with synthetic
+ * coordinates ({@code io.konveyor.embededdep} group, {@code 0.0.0-SNAPSHOT} version).
+ */
 public class BinaryBuildTool implements BuildTool {
 
     private static final Logger LOG = LoggerFactory.getLogger(BinaryBuildTool.class);

@@ -14,6 +14,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Gradle {@link BuildTool} implementation. Runs {@code gradlew dependencies
+ * --configuration compileClasspath} (preferring the wrapper when available) and resolves
+ * artifact JARs from {@code ~/.gradle/caches/modules-2/files-2.1}.
+ */
 public class GradleBuildTool implements BuildTool {
 
     private static final Logger LOG = LoggerFactory.getLogger(GradleBuildTool.class);

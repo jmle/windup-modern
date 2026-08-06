@@ -14,6 +14,12 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.Manifest;
 
+/**
+ * {@link DecompilerService} backed by Vineflower (FernFlower fork), embedded as a library.
+ * Uses the {@code Fernflower} class directly with a custom {@link DirectoryResultSaver}
+ * that writes {@code .java} files to disk. Supports parallel decompilation of multiple
+ * JARs via an internal {@link java.util.concurrent.ExecutorService} worker pool.
+ */
 public class VineflowerDecompiler implements DecompilerService {
 
     private static final Logger LOG = LoggerFactory.getLogger(VineflowerDecompiler.class);
@@ -113,6 +119,10 @@ public class VineflowerDecompiler implements DecompilerService {
         return baseOutputDir.resolve(jarName);
     }
 
+    /**
+     * Vineflower {@link IResultSaver} that writes decompiled {@code .java} files directly
+     * to a target directory instead of packaging them into a JAR.
+     */
     static class DirectoryResultSaver implements IResultSaver {
 
         private final Path outputDir;
@@ -185,6 +195,7 @@ public class VineflowerDecompiler implements DecompilerService {
         public void close() {}
     }
 
+    /** Bridges Vineflower's logging to SLF4J. */
     static class Slf4jFernflowerLogger extends IFernflowerLogger {
 
         Slf4jFernflowerLogger() {

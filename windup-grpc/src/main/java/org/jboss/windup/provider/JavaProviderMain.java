@@ -8,6 +8,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
+/**
+ * Entry point for the Konveyor Java analysis provider. Starts a gRPC server on the
+ * specified port, registering both {@link JavaProviderService} and {@link CodeSnipService}.
+ */
 public class JavaProviderMain {
 
     private static final Logger LOG = LoggerFactory.getLogger(JavaProviderMain.class);

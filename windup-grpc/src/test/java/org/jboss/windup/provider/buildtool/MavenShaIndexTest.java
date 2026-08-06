@@ -9,6 +9,10 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link MavenShaIndex}: SHA-1 binary search lookup, unknown JAR handling,
+ * directory path resolution, Maven coordinate parsing, and SHA-1 hash computation.
+ */
 class MavenShaIndexTest {
 
     @TempDir

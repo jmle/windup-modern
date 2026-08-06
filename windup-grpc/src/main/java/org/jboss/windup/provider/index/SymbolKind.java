@@ -1,5 +1,10 @@
 package org.jboss.windup.provider.index;
 
+/**
+ * Classification of a symbol, aligned with LSP {@code SymbolKind} values. The
+ * {@link #label()} string (e.g. "Module", "Class", "Method") is used as the
+ * {@code kind} variable in gRPC incident responses.
+ */
 public enum SymbolKind {
     FILE("File"),
     MODULE("Module"),

@@ -10,6 +10,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link ArchiveHandler}: archive explosion, JAR handling (decompile to source),
+ * and WAR handling (decompile WEB-INF/classes, extract WEB-INF/lib dependencies).
+ * Builds real compiled JARs and WARs from source at test time.
+ */
 class ArchiveHandlerTest {
 
     @TempDir

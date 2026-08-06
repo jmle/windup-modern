@@ -3,6 +3,11 @@ package org.jboss.windup.provider.buildtool;
 import java.nio.file.Path;
 import java.util.List;
 
+/**
+ * Abstraction over build tools (Maven, Gradle, bare binaries) for resolving project
+ * dependencies. Implementations detect the tool from project files, execute dependency
+ * resolution commands, and locate artifact JARs in the local cache.
+ */
 public interface BuildTool {
 
     enum Type { MAVEN, GRADLE, BINARY }

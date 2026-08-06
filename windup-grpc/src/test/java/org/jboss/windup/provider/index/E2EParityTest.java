@@ -11,6 +11,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Parity tests that run against the real analyzer-lsp example projects when available.
+ * Validates that queries matching actual e2e rule patterns produce the expected symbol
+ * matches. Conditionally enabled only when the examples directory exists on disk.
+ */
 @EnabledIf("examplesExist")
 class E2EParityTest {
 

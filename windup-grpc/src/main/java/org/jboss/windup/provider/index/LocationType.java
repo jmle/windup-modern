@@ -1,5 +1,11 @@
 package org.jboss.windup.provider.index;
 
+/**
+ * The kind of source code location where a symbol reference appears. Maps to the
+ * {@code location} field in Konveyor rule conditions (e.g. {@code IMPORT},
+ * {@code ANNOTATION}, {@code METHOD_CALL}). Used to partition symbols in the index
+ * and filter query results.
+ */
 public enum LocationType {
     TYPE,
     INHERITANCE,

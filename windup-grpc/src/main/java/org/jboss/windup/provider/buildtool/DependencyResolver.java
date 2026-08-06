@@ -11,6 +11,12 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
 
+/**
+ * Obtains Java source for project dependencies so they can be indexed and analyzed.
+ * For dependencies with source JARs, extracts {@code .java} files directly. For those
+ * without, decompiles binary JARs via {@link VineflowerDecompiler}. Also supports
+ * downloading source JARs through {@code mvn dependency:sources}.
+ */
 public class DependencyResolver {
 
     private static final Logger LOG = LoggerFactory.getLogger(DependencyResolver.class);

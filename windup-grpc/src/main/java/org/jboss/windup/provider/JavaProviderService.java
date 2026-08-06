@@ -12,6 +12,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * gRPC service implementing the Konveyor {@code ProviderService} contract. Handles
+ * workspace lifecycle (Init/Stop), symbol evaluation, and dependency retrieval.
+ * Each Init call creates an isolated {@link WorkspaceContext} identified by a numeric ID.
+ */
 public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImplBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(JavaProviderService.class);

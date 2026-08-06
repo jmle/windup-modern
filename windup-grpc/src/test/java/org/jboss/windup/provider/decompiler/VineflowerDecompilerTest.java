@@ -12,6 +12,11 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link VineflowerDecompiler}: single JAR decompilation, parallel multi-JAR
+ * decompilation, and error handling for nonexistent and empty JARs. Compiles real
+ * Java source to bytecode at test time to produce authentic class files.
+ */
 class VineflowerDecompilerTest {
 
     @TempDir

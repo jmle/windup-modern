@@ -8,6 +8,10 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link MavenBuildTool}: JAR path resolution in the local Maven repository
+ * layout, classifier handling, and missing artifact behavior.
+ */
 class MavenBuildToolTest {
 
     @TempDir

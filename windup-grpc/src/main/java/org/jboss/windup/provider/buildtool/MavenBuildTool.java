@@ -14,6 +14,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Maven {@link BuildTool} implementation. Runs {@code mvn dependency:tree} to resolve the
+ * full transitive dependency graph, then maps each artifact to its JAR in
+ * {@code ~/.m2/repository}. Skips test-scoped dependencies.
+ */
 public class MavenBuildTool implements BuildTool {
 
     private static final Logger LOG = LoggerFactory.getLogger(MavenBuildTool.class);

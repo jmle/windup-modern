@@ -13,6 +13,12 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Pattern;
 
+/**
+ * In-memory index of all Java symbols extracted from source files. Supports querying by
+ * pattern (glob syntax) and {@link LocationType} (IMPORT, ANNOTATION, METHOD_CALL, etc.).
+ * Tracks which files originate from dependencies vs application source so that
+ * {@code IsDependencyIncident} can be set on gRPC responses.
+ */
 public class SymbolIndex {
 
     private static final Logger LOG = LoggerFactory.getLogger(SymbolIndex.class);

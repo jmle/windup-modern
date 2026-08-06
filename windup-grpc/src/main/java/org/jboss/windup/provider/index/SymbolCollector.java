@@ -4,6 +4,12 @@ import org.eclipse.jdt.core.dom.*;
 
 import java.util.*;
 
+/**
+ * Eclipse JDT {@link ASTVisitor} that walks a parsed {@link CompilationUnit} and collects
+ * {@link IndexedSymbol} entries for all relevant AST nodes: imports, type declarations,
+ * method declarations, field declarations, annotations, constructor calls, method
+ * invocations, variable declarations, and instanceof checks.
+ */
 public class SymbolCollector extends ASTVisitor {
 
     private final CompilationUnit compilationUnit;

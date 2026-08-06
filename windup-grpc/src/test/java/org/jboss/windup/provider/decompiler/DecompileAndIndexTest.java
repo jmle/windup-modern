@@ -12,6 +12,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * End-to-end tests for the decompile-then-index pipeline: compiles Java source to a JAR,
+ * decompiles it, indexes the output as dependency source, and verifies that symbols are
+ * queryable and correctly marked as dependency files.
+ */
 class DecompileAndIndexTest {
 
     @TempDir

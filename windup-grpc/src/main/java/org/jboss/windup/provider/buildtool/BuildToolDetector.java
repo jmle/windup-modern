@@ -6,6 +6,11 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+/**
+ * Detects which {@link BuildTool} implementation to use for a given project directory.
+ * Detection priority: Gradle ({@code build.gradle} / {@code build.gradle.kts}) >
+ * Maven ({@code pom.xml}) > Binary ({@code .jar/.war/.ear} extension) > Maven (default).
+ */
 public class BuildToolDetector {
 
     private static final Logger LOG = LoggerFactory.getLogger(BuildToolDetector.class);

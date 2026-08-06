@@ -11,6 +11,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Unit tests for {@link SymbolIndex} covering all supported location types, glob pattern
+ * matching, star imports, annotated queries, and line number tracking. Uses synthetic
+ * Java source fixtures created in a temp directory.
+ */
 class SymbolIndexTest {
 
     @TempDir

@@ -17,6 +17,11 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Integration test that starts the full gRPC server in-process and exercises the complete
+ * provider lifecycle: Capabilities, Init, Evaluate (multiple location types), GetCodeSnip,
+ * GetDependencies, and Stop. Uses real Java source fixtures parsed by the actual indexer.
+ */
 class GrpcIntegrationTest {
 
     static final String SERVER_NAME = "test-java-provider";

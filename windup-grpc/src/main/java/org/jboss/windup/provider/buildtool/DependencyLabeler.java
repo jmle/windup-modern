@@ -9,6 +9,12 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.regex.Pattern;
 
+/**
+ * Classifies dependencies as {@code open-source} or {@code internal} and applies Konveyor
+ * labels ({@code konveyor.io/dep-source}, {@code konveyor.io/language},
+ * {@code konveyor.io/exclude}). Classification is driven by configurable regex patterns
+ * for open-source coordinates and a set of excluded package prefixes.
+ */
 public class DependencyLabeler {
 
     private static final Logger LOG = LoggerFactory.getLogger(DependencyLabeler.class);

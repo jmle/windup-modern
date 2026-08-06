@@ -9,6 +9,10 @@ import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link DependencyLabeler}: default open-source classification, internal
+ * labeling when patterns don't match, and package exclusion support.
+ */
 class DependencyLabelerTest {
 
     @Test

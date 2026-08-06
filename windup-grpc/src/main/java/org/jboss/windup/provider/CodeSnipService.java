@@ -11,6 +11,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+/**
+ * gRPC service implementing {@code ProviderCodeLocationService}. Returns source code
+ * snippets around a given location, formatted with line numbers and configurable
+ * context lines (default 10 above and below).
+ */
 public class CodeSnipService extends ProviderCodeLocationServiceGrpc.ProviderCodeLocationServiceImplBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(CodeSnipService.class);

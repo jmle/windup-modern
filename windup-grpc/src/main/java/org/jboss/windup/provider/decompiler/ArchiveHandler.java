@@ -10,6 +10,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+/**
+ * Handles JAR, WAR, and EAR archives for analysis. JARs are decompiled directly. WARs
+ * are exploded to decompile {@code WEB-INF/classes} and collect {@code WEB-INF/lib/*.jar}
+ * as dependencies. EARs are exploded and contained JARs/WARs are processed recursively.
+ */
 public class ArchiveHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(ArchiveHandler.class);

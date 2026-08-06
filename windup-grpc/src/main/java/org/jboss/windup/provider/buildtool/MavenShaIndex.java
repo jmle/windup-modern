@@ -12,6 +12,12 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Optional;
 
+/**
+ * Identifies unknown JARs by SHA-1 lookup against a pre-built sorted text index.
+ * The index file ({@code maven-index.txt}) contains lines of the form
+ * {@code <sha1-hex> <groupId>:<artifactId>:<packaging>:<version>}, sorted by hash.
+ * Lookup uses binary search via {@link java.io.RandomAccessFile} for O(log n) performance.
+ */
 public class MavenShaIndex {
 
     private static final Logger LOG = LoggerFactory.getLogger(MavenShaIndex.class);

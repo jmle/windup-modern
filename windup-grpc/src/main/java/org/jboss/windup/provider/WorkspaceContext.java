@@ -16,6 +16,12 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 
+/**
+ * Holds the analysis state for a single initialized workspace. On {@link #index()}, it parses
+ * all Java source files into a {@link SymbolIndex}, detects the build tool, resolves
+ * dependencies (downloading sources and decompiling when needed), and indexes dependency
+ * symbols. Subsequent {@link #evaluate} calls query this index against rule conditions.
+ */
 public class WorkspaceContext {
 
     private static final Logger LOG = LoggerFactory.getLogger(WorkspaceContext.class);

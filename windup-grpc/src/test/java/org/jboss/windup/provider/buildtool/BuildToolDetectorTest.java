@@ -8,6 +8,11 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link BuildToolDetector}: verifies detection of Maven, Gradle,
+ * Kotlin Gradle, priority when multiple build files coexist, and the default
+ * fallback to Maven for empty directories.
+ */
 class BuildToolDetectorTest {
 
     @TempDir

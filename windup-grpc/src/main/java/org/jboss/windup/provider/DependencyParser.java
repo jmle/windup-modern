@@ -12,6 +12,11 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 
+/**
+ * Static parser for Maven {@code pom.xml} and Gradle {@code build.gradle} files. Extracts
+ * declared dependencies without running external build tool commands. Used as a fallback
+ * when build tool execution fails or is unavailable.
+ */
 public class DependencyParser {
 
     private static final Logger LOG = LoggerFactory.getLogger(DependencyParser.class);
