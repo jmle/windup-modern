@@ -4,22 +4,19 @@ USER 0
 WORKDIR /build
 
 COPY pom.xml .
-COPY windup-bom/pom.xml windup-bom/pom.xml
-COPY windup-grpc/pom.xml windup-grpc/pom.xml
 
-RUN mvn dependency:go-offline -pl windup-grpc -am -q || true
+RUN mvn dependency:go-offline -q || true
 
-COPY windup-bom/ windup-bom/
-COPY windup-grpc/ windup-grpc/
+COPY src/ src/
 
-RUN mvn package -pl windup-grpc -am -DskipTests -q
+RUN mvn package -DskipTests -q
 
 FROM registry.access.redhat.com/ubi9/openjdk-17-runtime:latest
 
 USER 0
 WORKDIR /addon
 
-COPY --from=builder /build/windup-grpc/target/windup-grpc-7.0.0-SNAPSHOT.jar /usr/local/bin/java-provider.jar
+COPY --from=builder /build/target/java-analyzer-provider-1.0.0-SNAPSHOT.jar /usr/local/bin/java-provider.jar
 
 RUN chgrp -R 0 /addon && chmod -R g=u /addon
 USER 1001

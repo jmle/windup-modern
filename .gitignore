@@ -18,5 +18,5 @@ Thumbs.db
 # Quarkus
 .quarkus/
 
-# Old windup source (reference only, not part of the new project)
-/windup/
+# Provider work directory
+.java-provider-work/

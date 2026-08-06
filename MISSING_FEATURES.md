@@ -2,7 +2,7 @@
 
 This document catalogs features present in the Go-based Konveyor Java external provider
 (`analyzer-lsp/external-providers/java-external-provider`) that are not yet implemented in
-`windup-grpc`. These features are required for production parity.
+`java-analyzer-provider`. These features are required for production parity.
 
 ---
 
@@ -15,10 +15,10 @@ custom `DirectoryResultSaver` (implements `IResultSaver`) to write `.java` files
 Parallel decompilation via `ExecutorService` worker pool.
 
 **Implementation:**
-- `windup-grpc/.../decompiler/VineflowerDecompiler.java` -- core decompiler with worker pool
-- `windup-grpc/.../decompiler/ArchiveHandler.java` -- JAR/WAR/EAR handlers with recursive extraction
-- `windup-grpc/.../decompiler/DecompilerService.java` -- interface
-- `windup-grpc/.../decompiler/DecompileResult.java` -- result record
+- `java-analyzer-provider/.../decompiler/VineflowerDecompiler.java` -- core decompiler with worker pool
+- `java-analyzer-provider/.../decompiler/ArchiveHandler.java` -- JAR/WAR/EAR handlers with recursive extraction
+- `java-analyzer-provider/.../decompiler/DecompilerService.java` -- interface
+- `java-analyzer-provider/.../decompiler/DecompileResult.java` -- result record
 
 ---
 
@@ -30,7 +30,7 @@ Binary search over sorted text file (`maven-index.txt`) mapping SHA1 → Maven c
 Uses `RandomAccessFile` for random access. Falls back gracefully when index file not found.
 
 **Implementation:**
-- `windup-grpc/.../buildtool/MavenShaIndex.java` -- binary search, SHA1 computation, coordinate parsing
+- `java-analyzer-provider/.../buildtool/MavenShaIndex.java` -- binary search, SHA1 computation, coordinate parsing
 
 ---
 
@@ -43,11 +43,11 @@ priority: Gradle > Maven > Binary (matching Go provider). Runs actual build tool
 for transitive dependency resolution.
 
 **Implementation:**
-- `windup-grpc/.../buildtool/BuildTool.java` -- interface with `Type` enum and `ResolvedDependency` record
-- `windup-grpc/.../buildtool/BuildToolDetector.java` -- detection logic
-- `windup-grpc/.../buildtool/MavenBuildTool.java` -- runs `mvn dependency:tree`, parses output
-- `windup-grpc/.../buildtool/GradleBuildTool.java` -- runs `gradlew dependencies`, wrapper support
-- `windup-grpc/.../buildtool/BinaryBuildTool.java` -- walks directory for archives
+- `java-analyzer-provider/.../buildtool/BuildTool.java` -- interface with `Type` enum and `ResolvedDependency` record
+- `java-analyzer-provider/.../buildtool/BuildToolDetector.java` -- detection logic
+- `java-analyzer-provider/.../buildtool/MavenBuildTool.java` -- runs `mvn dependency:tree`, parses output
+- `java-analyzer-provider/.../buildtool/GradleBuildTool.java` -- runs `gradlew dependencies`, wrapper support
+- `java-analyzer-provider/.../buildtool/BinaryBuildTool.java` -- walks directory for archives
 
 ---
 
@@ -60,10 +60,10 @@ Full pipeline: detect build tool → resolve deps → download source JARs (`mvn
 `IsDependencyIncident` flag set on incidents from dependency files.
 
 **Implementation:**
-- `windup-grpc/.../buildtool/DependencyResolver.java` -- orchestrates source extraction + decompilation
-- `windup-grpc/.../buildtool/DependencyLabeler.java` -- open-source vs internal classification
-- `windup-grpc/.../index/SymbolIndex.java` -- `indexDependencyDirectory()` and `isDependencyFile()`
-- `windup-grpc/.../WorkspaceContext.java` -- wired into `index()` flow
+- `java-analyzer-provider/.../buildtool/DependencyResolver.java` -- orchestrates source extraction + decompilation
+- `java-analyzer-provider/.../buildtool/DependencyLabeler.java` -- open-source vs internal classification
+- `java-analyzer-provider/.../index/SymbolIndex.java` -- `indexDependencyDirectory()` and `isDependencyFile()`
+- `java-analyzer-provider/.../WorkspaceContext.java` -- wired into `index()` flow
 
 ---
 
@@ -75,7 +75,7 @@ JAR/WAR/EAR handlers with recursive extraction. WAR: decompiles WEB-INF/classes,
 WEB-INF/lib/*.jar as dependencies. EAR: recursively processes contained JARs/WARs.
 
 **Implementation:**
-- `windup-grpc/.../decompiler/ArchiveHandler.java` -- `handleJar()`, `handleWar()`, `handleEar()`, `explode()`
+- `java-analyzer-provider/.../decompiler/ArchiveHandler.java` -- `handleJar()`, `handleWar()`, `handleEar()`, `explode()`
 
 ---
 
@@ -91,7 +91,7 @@ markers (`$`).
 - `filter.go` `getURI()` (lines 147-240)
 - Delegates to `BuildTool.GetSourceFileLocation()` which may trigger on-demand `jar xf`
 
-**Note:** This is only relevant if the Java provider delegates to JDTLS. If windup-grpc
+**Note:** This is only relevant if the Java provider delegates to JDTLS. If java-analyzer-provider
 continues to do its own AST parsing, this URI scheme is not needed -- but the provider must
 still be able to resolve incidents found in decompiled dependency sources back to meaningful
 file paths.
@@ -107,8 +107,8 @@ Labels dependencies as `konveyor.io/dep-source=open-source|internal`, adds
 Configurable via regex patterns file and exclude packages list.
 
 **Implementation:**
-- `windup-grpc/.../buildtool/DependencyLabeler.java` -- classification logic, config loading
-- `windup-grpc/.../WorkspaceContext.java` -- wired into `getDependenciesFromBuildTool()` response
+- `java-analyzer-provider/.../buildtool/DependencyLabeler.java` -- classification logic, config loading
+- `java-analyzer-provider/.../WorkspaceContext.java` -- wired into `getDependenciesFromBuildTool()` response
 
 ---
 
@@ -178,7 +178,7 @@ determine which files to include.
 - `service_client.go` `GetAllSymbols()` lines 158-298
 - Provider-level `includedPaths`, rule-scope included/excluded paths, condition-level `filepaths`
 
-**Current state in windup-grpc:** Not implemented. All files in the workspace are included
+**Current state in java-analyzer-provider:** Not implemented. All files in the workspace are included
 in query results.
 
 ---
