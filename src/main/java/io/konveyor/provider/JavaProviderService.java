@@ -4,10 +4,12 @@ import com.google.protobuf.Empty;
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.grpc.stub.StreamObserver;
+import io.konveyor.provider.buildtool.MavenArtifactDownloader;
 import io.konveyor.provider.grpc.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -56,6 +58,14 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
         LOG.info("Init workspace id={} location={} mode={}", id, location, analysisMode);
 
         try {
+            if (MavenArtifactDownloader.isMvnUri(location)) {
+                MavenArtifactDownloader downloader = new MavenArtifactDownloader();
+                Path workDir = Path.of(System.getProperty("java.io.tmpdir"), "java-provider-mvn-" + id);
+                Path downloaded = downloader.download(location, workDir);
+                location = downloaded.toString();
+                LOG.info("Downloaded mvn artifact to {}", location);
+            }
+
             WorkspaceContext ctx = new WorkspaceContext(id, location, analysisMode, request, contextLines);
             ctx.index();
             workspaces.put(id, ctx);

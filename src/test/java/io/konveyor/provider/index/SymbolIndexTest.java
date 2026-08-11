@@ -187,9 +187,9 @@ class SymbolIndexTest {
 
     @Test
     void shouldIndexMethodCalls() {
-        // Without binding resolution, the receiver "myBean" resolves via the package fallback.
+        // "myBean" is a field of type Bean — resolved via field type tracking.
         // The name is the CONTAINING method, not the called method.
-        List<IndexedSymbol> calls = index.query("com.example.apps.myBean.getName", LocationType.METHOD_CALL);
+        List<IndexedSymbol> calls = index.query("com.example.apps.Bean.getName", LocationType.METHOD_CALL);
         assertThat(calls).hasSize(1);
         assertThat(calls.get(0).kind()).isEqualTo(SymbolKind.METHOD);
         assertThat(calls.get(0).name()).isEqualTo("doStuff");

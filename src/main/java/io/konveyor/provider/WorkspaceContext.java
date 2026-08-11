@@ -35,6 +35,7 @@ public class WorkspaceContext {
     private final Config config;
     private final int contextLines;
     private final SymbolIndex symbolIndex = new SymbolIndex();
+    private final List<String> includedPaths;
     private BuildTool buildTool;
     private List<BuildTool.ResolvedDependency> resolvedDeps;
 
@@ -44,25 +45,73 @@ public class WorkspaceContext {
         this.analysisMode = analysisMode;
         this.config = config;
         this.contextLines = contextLines;
+        this.includedPaths = extractIncludedPaths(config);
+    }
+
+    private static List<String> extractIncludedPaths(Config config) {
+        if (!config.hasProviderSpecificConfig()) {
+            return List.of();
+        }
+        var fields = config.getProviderSpecificConfig().getFieldsMap();
+        var ipValue = fields.get("includedPaths");
+        if (ipValue == null || !ipValue.hasListValue()) {
+            return List.of();
+        }
+        return ipValue.getListValue().getValuesList().stream()
+                .filter(com.google.protobuf.Value::hasStringValue)
+                .map(com.google.protobuf.Value::getStringValue)
+                .toList();
     }
 
     public void index() throws IOException {
         Path root = Path.of(location);
-        symbolIndex.indexDirectory(root);
+
+        if (isArchive(root)) {
+            indexArchive(root);
+        } else {
+            if (includedPaths.isEmpty()) {
+                symbolIndex.indexDirectory(root);
+            } else {
+                symbolIndex.indexDirectory(root, includedPaths);
+            }
+        }
         LOG.info("Workspace {} indexed: {} symbols from application source", id, symbolIndex.size());
 
-        buildTool = BuildToolDetector.detect(root);
-        try {
-            resolvedDeps = buildTool.getDependencies(root);
-            LOG.info("Resolved {} dependencies via {} for workspace {}",
-                    resolvedDeps.size(), buildTool.getType(), id);
-        } catch (Exception e) {
-            LOG.warn("Dependency resolution failed, falling back to static parsing: {}", e.getMessage());
-            resolvedDeps = List.of();
-        }
+        if (!isArchive(root)) {
+            buildTool = BuildToolDetector.detect(root);
+            try {
+                resolvedDeps = buildTool.getDependencies(root);
+                LOG.info("Resolved {} dependencies via {} for workspace {}",
+                        resolvedDeps.size(), buildTool.getType(), id);
+            } catch (Exception e) {
+                LOG.warn("Dependency resolution failed, falling back to static parsing: {}", e.getMessage());
+                resolvedDeps = List.of();
+            }
 
-        if (!resolvedDeps.isEmpty() && !"source-only".equals(analysisMode)) {
-            resolveDependencySources(root);
+            if (!resolvedDeps.isEmpty() && !"source-only".equals(analysisMode)) {
+                resolveDependencySources(root);
+            }
+        }
+    }
+
+    private static boolean isArchive(Path path) {
+        if (!Files.isRegularFile(path)) return false;
+        String name = path.getFileName().toString().toLowerCase();
+        return name.endsWith(".jar") || name.endsWith(".war") || name.endsWith(".ear");
+    }
+
+    private void indexArchive(Path archivePath) throws IOException {
+        Path workDir = archivePath.getParent().resolve(".java-provider-work");
+        Files.createDirectories(workDir);
+
+        var decompiler = new io.konveyor.provider.decompiler.VineflowerDecompiler();
+        var handler = new io.konveyor.provider.decompiler.ArchiveHandler(decompiler);
+        var result = handler.handleArchive(archivePath, workDir);
+
+        for (Path sourceDir : result.sourceDirs()) {
+            if (Files.isDirectory(sourceDir)) {
+                symbolIndex.indexDirectory(sourceDir);
+            }
         }
     }
 

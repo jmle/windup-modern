@@ -17,6 +17,8 @@ public class SymbolCollector extends ASTVisitor {
     private final List<IndexedSymbol> symbols = new ArrayList<>();
     private final Map<String, String> importMap = new HashMap<>();
     private final List<String> starImportPackages = new ArrayList<>();
+    private final Map<String, List<String>> fieldTypes = new HashMap<>();
+    private Map<String, List<String>> localVarTypes = new HashMap<>();
     private String packageName = "";
 
     public SymbolCollector(CompilationUnit compilationUnit, String fileUri) {
@@ -54,22 +56,24 @@ public class SymbolCollector extends ASTVisitor {
     }
 
     private List<String> resolveTypeName(String name) {
-        if (name.contains(".")) {
-            return List.of(name);
+        int genericIdx = name.indexOf('<');
+        final String baseName = genericIdx >= 0 ? name.substring(0, genericIdx) : name;
+        if (baseName.contains(".")) {
+            return List.of(baseName);
         }
-        String explicit = importMap.get(name);
+        String explicit = importMap.get(baseName);
         if (explicit != null) {
             return List.of(explicit);
         }
         if (!starImportPackages.isEmpty()) {
             return starImportPackages.stream()
-                    .map(pkg -> pkg + "." + name)
+                    .map(pkg -> pkg + "." + baseName)
                     .toList();
         }
         if (!packageName.isEmpty()) {
-            return List.of(packageName + "." + name);
+            return List.of(packageName + "." + baseName);
         }
-        return List.of(name);
+        return List.of(baseName);
     }
 
     private String resolveToSingleName(String name) {
@@ -98,7 +102,17 @@ public class SymbolCollector extends ASTVisitor {
     // ------------------------------------------------------------------
 
     @Override
+    @SuppressWarnings("unchecked")
     public boolean visit(TypeDeclaration node) {
+        fieldTypes.clear();
+        for (FieldDeclaration field : node.getFields()) {
+            String typeStr = typeToString(field.getType());
+            List<String> resolved = resolveTypeName(typeStr);
+            for (VariableDeclarationFragment frag : (List<VariableDeclarationFragment>) field.fragments()) {
+                fieldTypes.put(frag.getName().getIdentifier(), resolved);
+            }
+        }
+
         String simpleName = node.getName().getIdentifier();
         String fqn = buildQualifiedName(node);
 
@@ -160,6 +174,14 @@ public class SymbolCollector extends ASTVisitor {
 
     @Override
     public boolean visit(MethodDeclaration node) {
+        localVarTypes = new HashMap<>();
+        @SuppressWarnings("unchecked")
+        List<SingleVariableDeclaration> methodParams = node.parameters();
+        for (SingleVariableDeclaration param : methodParams) {
+            localVarTypes.put(param.getName().getIdentifier(),
+                    resolveTypeName(typeToString(param.getType())));
+        }
+
         String methodName = node.getName().getIdentifier();
         String containingClass = getContainingClassName(node);
         String methodFqn = containingClass.isEmpty() ? methodName : containingClass + "." + methodName;
@@ -238,8 +260,14 @@ public class SymbolCollector extends ASTVisitor {
     @Override
     public boolean visit(VariableDeclarationStatement node) {
         String typeStr = typeToString(node.getType());
+        List<String> resolvedTypes = resolveTypeName(typeStr);
+        @SuppressWarnings("unchecked")
+        List<VariableDeclarationFragment> varFragments = node.fragments();
+        for (VariableDeclarationFragment frag : varFragments) {
+            localVarTypes.put(frag.getName().getIdentifier(), resolvedTypes);
+        }
         String containingMethod = getContainingMethodName(node);
-        for (String resolved : resolveTypeName(typeStr)) {
+        for (String resolved : resolvedTypes) {
             @SuppressWarnings("unchecked")
             List<VariableDeclarationFragment> fragments = node.fragments();
             for (VariableDeclarationFragment frag : fragments) {
@@ -285,7 +313,17 @@ public class SymbolCollector extends ASTVisitor {
 
         if (node.getExpression() != null) {
             String exprStr = node.getExpression().toString();
-            for (String resolved : resolveTypeName(exprStr)) {
+            List<String> resolvedNames;
+            if (node.getExpression() instanceof SimpleName) {
+                resolvedNames = localVarTypes.containsKey(exprStr)
+                        ? localVarTypes.get(exprStr)
+                        : fieldTypes.containsKey(exprStr)
+                        ? fieldTypes.get(exprStr)
+                        : resolveTypeName(exprStr);
+            } else {
+                resolvedNames = resolveTypeName(exprStr);
+            }
+            for (String resolved : resolvedNames) {
                 String callFqn = resolved + "." + calledMethodName;
                 addSymbol(callFqn, containingMethodName, SymbolKind.METHOD, LocationType.METHOD_CALL, node.getName());
             }
@@ -321,9 +359,26 @@ public class SymbolCollector extends ASTVisitor {
 
     private void addAnnotationSymbol(Annotation annotation) {
         String simpleName = annotation.getTypeName().getFullyQualifiedName();
+        List<IndexedSymbol.AnnotationInfo> siblings = collectSiblingAnnotations(annotation);
         for (String resolved : resolveTypeName(simpleName)) {
-            addSymbol(resolved, simpleName, SymbolKind.PROPERTY, LocationType.ANNOTATION, annotation);
+            addSymbol(resolved, simpleName, SymbolKind.PROPERTY, LocationType.ANNOTATION,
+                    annotation, siblings);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<IndexedSymbol.AnnotationInfo> collectSiblingAnnotations(Annotation annotation) {
+        ASTNode parent = annotation.getParent();
+        if (parent instanceof BodyDeclaration bd) {
+            List<IndexedSymbol.AnnotationInfo> result = new ArrayList<>();
+            for (Object mod : (List<Object>) bd.modifiers()) {
+                if (mod instanceof Annotation a) {
+                    result.add(buildAnnotationInfo(a));
+                }
+            }
+            return result;
+        }
+        return List.of(buildAnnotationInfo(annotation));
     }
 
     // ------------------------------------------------------------------
@@ -486,15 +541,31 @@ public class SymbolCollector extends ASTVisitor {
             List<MemberValuePair> pairs = normal.values();
             for (MemberValuePair pair : pairs) {
                 elements.put(pair.getName().getIdentifier(),
-                        pair.getValue() != null ? pair.getValue().toString() : "");
+                        pair.getValue() != null ? extractAnnotationValue(pair.getValue()) : "");
             }
         } else if (annotation instanceof SingleMemberAnnotation single) {
             if (single.getValue() != null) {
-                elements.put("value", single.getValue().toString());
+                elements.put("value", extractAnnotationValue(single.getValue()));
             }
         }
 
         return new IndexedSymbol.AnnotationInfo(resolved, elements);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String extractAnnotationValue(Expression expr) {
+        if (expr instanceof StringLiteral sl) {
+            return sl.getLiteralValue();
+        }
+        if (expr instanceof ArrayInitializer ai) {
+            List<Expression> exprs = ai.expressions();
+            if (!exprs.isEmpty()) {
+                return exprs.stream()
+                        .map(this::extractAnnotationValue)
+                        .findFirst().orElse(expr.toString());
+            }
+        }
+        return expr.toString();
     }
 
     static String typeToString(Type type) {

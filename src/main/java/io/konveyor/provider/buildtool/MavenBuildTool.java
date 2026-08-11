@@ -32,7 +32,7 @@ import java.util.List;
  * Maven {@link BuildTool} implementation using the embedded Maven Resolver API. Parses
  * {@code pom.xml} and resolves the full transitive dependency graph in-process, without
  * requiring an external {@code mvn} binary. Maps each artifact to its JAR in the local
- * Maven repository. Skips test-scoped dependencies.
+ * Maven repository.
  */
 public class MavenBuildTool implements BuildTool {
 
@@ -69,8 +69,6 @@ public class MavenBuildTool implements BuildTool {
             collectRequest.setRepositories(remoteRepos);
 
             for (org.apache.maven.model.Dependency modelDep : model.getDependencies()) {
-                if ("test".equals(modelDep.getScope())) continue;
-
                 String coords = modelDep.getGroupId() + ":" + modelDep.getArtifactId()
                         + ":" + (modelDep.getType() != null ? modelDep.getType() : "jar")
                         + (modelDep.getClassifier() != null ? ":" + modelDep.getClassifier() : "")
@@ -119,7 +117,6 @@ public class MavenBuildTool implements BuildTool {
         if (artifact == null) return;
 
         String scope = node.getDependency() != null ? node.getDependency().getScope() : "compile";
-        if ("test".equals(scope)) return;
 
         String groupId = artifact.getGroupId();
         String artifactId = artifact.getArtifactId();

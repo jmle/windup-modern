@@ -34,6 +34,10 @@ public class SymbolIndex {
     private final Set<String> dependencyFileUris = new HashSet<>();
 
     public void indexDirectory(Path root) throws IOException {
+        indexDirectory(root, List.of());
+    }
+
+    public void indexDirectory(Path root, List<String> includedPaths) throws IOException {
         if (!Files.isDirectory(root)) {
             throw new IOException("Not a directory: " + root);
         }
@@ -43,7 +47,9 @@ public class SymbolIndex {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                 if (file.toString().endsWith(".java")) {
-                    javaFiles.add(file);
+                    if (includedPaths.isEmpty() || matchesIncludedPath(root, file, includedPaths)) {
+                        javaFiles.add(file);
+                    }
                 }
                 return FileVisitResult.CONTINUE;
             }
@@ -60,6 +66,17 @@ public class SymbolIndex {
         }
 
         LOG.info("Indexed {} symbols across {} files", allSymbols.size(), javaFiles.size());
+    }
+
+    private static boolean matchesIncludedPath(Path root, Path file, List<String> includedPaths) {
+        Path relative = root.resolve(".").normalize().relativize(file.normalize());
+        String relStr = relative.toString();
+        for (String included : includedPaths) {
+            if (relStr.equals(included) || relStr.endsWith(included)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void indexDependencyDirectory(Path root) throws IOException {
@@ -263,18 +280,16 @@ public class SymbolIndex {
         String typePattern = rawPattern.substring(spaceIdx + 1).trim();
 
         Pattern nameRegex = globToRegex(namePattern);
-        Pattern typeRegex = globToRegex(typePattern);
+        Pattern typeRegex = globToRegex(stripTypeParameters(typePattern));
+
+        String symQn = stripTypeParameters(sym.qualifiedName());
 
         if (location == LocationType.FIELD) {
-            // For FIELD: qualifiedName is the type, name is the field name
             return nameRegex.matcher(sym.name()).matches()
-                    && typeRegex.matcher(sym.qualifiedName()).matches();
+                    && typeRegex.matcher(symQn).matches();
         } else {
-            // For METHOD with "* ReturnType" pattern:
-            // Need to find METHOD symbols whose return type matches
-            // These are stored as RETURN_TYPE location; query those instead
             return nameRegex.matcher(sym.name()).matches()
-                    && typeRegex.matcher(sym.qualifiedName()).matches();
+                    && typeRegex.matcher(symQn).matches();
         }
     }
 
