@@ -48,6 +48,11 @@ public class MavenBuildTool implements BuildTool {
 
     @Override
     public List<ResolvedDependency> getDependencies(Path projectDir) {
+        return BuildTool.flattenDag(getDependenciesDAG(projectDir));
+    }
+
+    @Override
+    public List<DagEntry> getDependenciesDAG(Path projectDir) {
         Path pomFile = projectDir.resolve("pom.xml");
         if (!Files.exists(pomFile)) {
             LOG.warn("No pom.xml found in {}", projectDir);
@@ -55,47 +60,19 @@ public class MavenBuildTool implements BuildTool {
         }
 
         try {
-            Model model = parsePom(pomFile);
-            if (model.getDependencies().isEmpty()) {
-                return List.of();
-            }
+            DependencyNode root = collectDependencyTree(projectDir);
+            if (root == null) return List.of();
 
             String pomPath = pomFile.toAbsolutePath().toString();
-            RepositorySystem repoSystem = newRepositorySystem();
-            DefaultRepositorySystemSession session = newSession(repoSystem);
-            List<RemoteRepository> remoteRepos = buildRemoteRepos(model);
-
-            CollectRequest collectRequest = new CollectRequest();
-            collectRequest.setRepositories(remoteRepos);
-
-            for (org.apache.maven.model.Dependency modelDep : model.getDependencies()) {
-                String coords = modelDep.getGroupId() + ":" + modelDep.getArtifactId()
-                        + ":" + (modelDep.getType() != null ? modelDep.getType() : "jar")
-                        + (modelDep.getClassifier() != null ? ":" + modelDep.getClassifier() : "")
-                        + ":" + (modelDep.getVersion() != null ? modelDep.getVersion() : "RELEASE");
-
-                Artifact artifact = new DefaultArtifact(coords);
-                Dependency dep = new Dependency(artifact,
-                        modelDep.getScope() != null ? modelDep.getScope() : "compile");
-                collectRequest.addDependency(dep);
-            }
-
-            CollectResult collectResult = repoSystem.collectDependencies(session, collectRequest);
-            DependencyNode root = collectResult.getRoot();
-
-            List<ResolvedDependency> deps = new ArrayList<>();
             Path localRepo = getLocalRepoPath();
 
+            List<DagEntry> dag = new ArrayList<>();
             for (DependencyNode directChild : root.getChildren()) {
-                addDependency(directChild, localRepo, pomPath, false, deps);
-
-                for (DependencyNode transitiveChild : directChild.getChildren()) {
-                    collectTransitive(transitiveChild, localRepo, pomPath, deps);
-                }
+                dag.add(buildDagEntry(directChild, localRepo, pomPath, false));
             }
 
-            LOG.info("Resolved {} Maven dependencies from {}", deps.size(), projectDir);
-            return deps;
+            LOG.info("Resolved {} top-level Maven dependencies from {}", dag.size(), projectDir);
+            return dag;
 
         } catch (Exception e) {
             LOG.error("Failed to resolve Maven dependencies in {}", projectDir, e);
@@ -103,18 +80,52 @@ public class MavenBuildTool implements BuildTool {
         }
     }
 
-    private void collectTransitive(DependencyNode node, Path localRepo, String pomPath,
-                                   List<ResolvedDependency> deps) {
-        addDependency(node, localRepo, pomPath, true, deps);
-        for (DependencyNode child : node.getChildren()) {
-            collectTransitive(child, localRepo, pomPath, deps);
+    DependencyNode collectDependencyTree(Path projectDir) throws Exception {
+        Path pomFile = projectDir.resolve("pom.xml");
+        Model model = parsePom(pomFile);
+        if (model.getDependencies().isEmpty()) {
+            return null;
         }
+
+        RepositorySystem repoSystem = newRepositorySystem();
+        DefaultRepositorySystemSession session = newSession(repoSystem);
+        List<RemoteRepository> remoteRepos = buildRemoteRepos(model);
+
+        CollectRequest collectRequest = new CollectRequest();
+        collectRequest.setRepositories(remoteRepos);
+
+        for (org.apache.maven.model.Dependency modelDep : model.getDependencies()) {
+            String coords = modelDep.getGroupId() + ":" + modelDep.getArtifactId()
+                    + ":" + (modelDep.getType() != null ? modelDep.getType() : "jar")
+                    + (modelDep.getClassifier() != null ? ":" + modelDep.getClassifier() : "")
+                    + ":" + (modelDep.getVersion() != null ? modelDep.getVersion() : "RELEASE");
+
+            Artifact artifact = new DefaultArtifact(coords);
+            Dependency dep = new Dependency(artifact,
+                    modelDep.getScope() != null ? modelDep.getScope() : "compile");
+            collectRequest.addDependency(dep);
+        }
+
+        CollectResult collectResult = repoSystem.collectDependencies(session, collectRequest);
+        return collectResult.getRoot();
     }
 
-    private void addDependency(DependencyNode node, Path localRepo, String pomPath,
-                               boolean indirect, List<ResolvedDependency> deps) {
+    private DagEntry buildDagEntry(DependencyNode node, Path localRepo, String pomPath,
+                                   boolean indirect) {
+        ResolvedDependency dep = toResolvedDependency(node, localRepo, pomPath, indirect);
+        List<DagEntry> children = new ArrayList<>();
+        for (DependencyNode child : node.getChildren()) {
+            children.add(buildDagEntry(child, localRepo, pomPath, true));
+        }
+        return new DagEntry(dep, children);
+    }
+
+    private ResolvedDependency toResolvedDependency(DependencyNode node, Path localRepo,
+                                                    String pomPath, boolean indirect) {
         Artifact artifact = node.getArtifact();
-        if (artifact == null) return;
+        if (artifact == null) {
+            return new ResolvedDependency("", "", "", null, "compile", null, false, indirect, pomPath);
+        }
 
         String scope = node.getDependency() != null ? node.getDependency().getScope() : "compile";
 
@@ -127,9 +138,9 @@ public class MavenBuildTool implements BuildTool {
         Path jarPath = resolveJarPath(localRepo, groupId, artifactId, version, classifier, extension);
         boolean hasSource = jarPath != null && Files.exists(sourceJarPath(jarPath));
 
-        deps.add(new ResolvedDependency(
+        return new ResolvedDependency(
                 groupId, artifactId, version, classifier, scope, jarPath, hasSource,
-                indirect, pomPath));
+                indirect, pomPath);
     }
 
     private Model parsePom(Path pomFile) throws Exception {

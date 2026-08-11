@@ -1,6 +1,7 @@
 package io.konveyor.provider.buildtool;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -16,7 +17,30 @@ public interface BuildTool {
 
     List<ResolvedDependency> getDependencies(Path projectDir);
 
+    default List<DagEntry> getDependenciesDAG(Path projectDir) {
+        return getDependencies(projectDir).stream()
+                .map(dep -> new DagEntry(dep, List.of()))
+                .toList();
+    }
+
     Path getLocalRepoPath();
+
+    record DagEntry(ResolvedDependency dep, List<DagEntry> children) {}
+
+    static List<ResolvedDependency> flattenDag(List<DagEntry> dag) {
+        List<ResolvedDependency> result = new ArrayList<>();
+        for (DagEntry entry : dag) {
+            flattenDagEntry(entry, result);
+        }
+        return result;
+    }
+
+    private static void flattenDagEntry(DagEntry entry, List<ResolvedDependency> result) {
+        result.add(entry.dep());
+        for (DagEntry child : entry.children()) {
+            flattenDagEntry(child, result);
+        }
+    }
 
     record ResolvedDependency(
             String groupId,

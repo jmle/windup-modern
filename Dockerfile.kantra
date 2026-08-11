@@ -1,0 +1,39 @@
+FROM registry.access.redhat.com/ubi9/openjdk-17:latest as builder
+
+USER 0
+WORKDIR /build
+
+COPY pom.xml .
+
+RUN mvn dependency:go-offline -q || true
+
+COPY src/ src/
+
+RUN mvn package -DskipTests -q
+
+FROM registry.access.redhat.com/ubi9/openjdk-17-runtime:latest
+
+USER 0
+WORKDIR /addon
+
+COPY --from=builder /build/target/java-analyzer-provider-1.0.0-SNAPSHOT.jar /usr/local/bin/java-provider.jar
+
+# Wrapper script so kantra can invoke it as java-external-provider --port N
+RUN printf '#!/bin/sh\nexec java -jar /usr/local/bin/java-provider.jar "$@"\n' \
+    > /usr/local/bin/java-external-provider && \
+    chmod +x /usr/local/bin/java-external-provider
+
+# Create dummy paths that kantra config references (not used by the Java provider)
+RUN mkdir -p /jdtls/bin && \
+    touch /jdtls/bin/jdtls && \
+    mkdir -p /jdtls/java-analyzer-bundle/java-analyzer-bundle.core/target && \
+    touch /jdtls/java-analyzer-bundle/java-analyzer-bundle.core/target/java-analyzer-bundle.core-1.0.0-SNAPSHOT.jar && \
+    touch /usr/local/etc/maven.default.index
+
+RUN chgrp -R 0 /addon && chmod -R g=u /addon
+USER 1001
+
+ENV HOME=/addon
+EXPOSE 14651
+
+ENTRYPOINT ["java-external-provider", "--port", "14651"]

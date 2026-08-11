@@ -15,6 +15,7 @@ import org.yaml.snakeyaml.Yaml;
 import org.apache.maven.artifact.versioning.ComparableVersion;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -36,8 +37,10 @@ public class WorkspaceContext {
     private final int contextLines;
     private final SymbolIndex symbolIndex = new SymbolIndex();
     private final List<String> includedPaths;
+    private final DependencyLabeler labeler;
     private BuildTool buildTool;
     private List<BuildTool.ResolvedDependency> resolvedDeps;
+    private List<BuildTool.DagEntry> resolvedDag;
 
     public WorkspaceContext(long id, String location, String analysisMode, Config config, int contextLines) {
         this.id = id;
@@ -46,18 +49,34 @@ public class WorkspaceContext {
         this.config = config;
         this.contextLines = contextLines;
         this.includedPaths = extractIncludedPaths(config);
+        this.labeler = createLabeler(config);
     }
 
     private static List<String> extractIncludedPaths(Config config) {
-        if (!config.hasProviderSpecificConfig()) {
-            return List.of();
-        }
+        return extractListConfig(config, "includedPaths");
+    }
+
+    private static DependencyLabeler createLabeler(Config config) {
+        String labelsFile = extractStringConfig(config, "depOpenSourceLabelsFile");
+        List<String> excludePkgs = extractListConfig(config, "excludePackages");
+        return DependencyLabeler.fromConfig(labelsFile, excludePkgs);
+    }
+
+    static String extractStringConfig(Config config, String key) {
+        if (!config.hasProviderSpecificConfig()) return null;
         var fields = config.getProviderSpecificConfig().getFieldsMap();
-        var ipValue = fields.get("includedPaths");
-        if (ipValue == null || !ipValue.hasListValue()) {
-            return List.of();
-        }
-        return ipValue.getListValue().getValuesList().stream()
+        var value = fields.get(key);
+        if (value == null || !value.hasStringValue()) return null;
+        String s = value.getStringValue();
+        return s.isEmpty() ? null : s;
+    }
+
+    static List<String> extractListConfig(Config config, String key) {
+        if (!config.hasProviderSpecificConfig()) return List.of();
+        var fields = config.getProviderSpecificConfig().getFieldsMap();
+        var value = fields.get(key);
+        if (value == null || !value.hasListValue()) return List.of();
+        return value.getListValue().getValuesList().stream()
                 .filter(com.google.protobuf.Value::hasStringValue)
                 .map(com.google.protobuf.Value::getStringValue)
                 .toList();
@@ -80,11 +99,13 @@ public class WorkspaceContext {
         if (!isArchive(root)) {
             buildTool = BuildToolDetector.detect(root);
             try {
-                resolvedDeps = buildTool.getDependencies(root);
-                LOG.info("Resolved {} dependencies via {} for workspace {}",
-                        resolvedDeps.size(), buildTool.getType(), id);
+                resolvedDag = buildTool.getDependenciesDAG(root);
+                resolvedDeps = BuildTool.flattenDag(resolvedDag);
+                LOG.info("Resolved {} dependencies ({} top-level) via {} for workspace {}",
+                        resolvedDeps.size(), resolvedDag.size(), buildTool.getType(), id);
             } catch (Exception e) {
                 LOG.warn("Dependency resolution failed, falling back to static parsing: {}", e.getMessage());
+                resolvedDag = List.of();
                 resolvedDeps = List.of();
             }
 
@@ -120,7 +141,8 @@ public class WorkspaceContext {
 
         if (buildTool.getType() == BuildTool.Type.MAVEN) {
             resolver.downloadSources(resolvedDeps, projectDir);
-            resolvedDeps = buildTool.getDependencies(projectDir);
+            resolvedDag = buildTool.getDependenciesDAG(projectDir);
+            resolvedDeps = BuildTool.flattenDag(resolvedDag);
         }
 
         Path workDir = projectDir.resolve(".java-provider-work");
@@ -183,11 +205,12 @@ public class WorkspaceContext {
         Map<String, Object> annotated = (Map<String, Object>) referenced.get("annotated");
         if (annotated != null) {
             annotatedPattern = (String) annotated.get("pattern");
-            List<Map<String, String>> elements = (List<Map<String, String>>) annotated.get("elements");
+            List<Map<String, Object>> elements = (List<Map<String, Object>>) annotated.get("elements");
             if (elements != null && !elements.isEmpty()) {
                 annotatedElements = new LinkedHashMap<>();
-                for (Map<String, String> elem : elements) {
-                    annotatedElements.put(elem.get("name"), elem.get("value"));
+                for (Map<String, Object> elem : elements) {
+                    annotatedElements.put(String.valueOf(elem.get("name")),
+                            String.valueOf(elem.get("value")));
                 }
             }
         }
@@ -210,6 +233,22 @@ public class WorkspaceContext {
         if (location == LocationType.IMPORT) {
             matches = matches.stream()
                     .filter(s -> s.kind() == SymbolKind.MODULE)
+                    .toList();
+        }
+
+        List<String> filepaths = extractFilepaths(referenced);
+        if (filepaths != null && !filepaths.isEmpty()) {
+            Set<String> allowedUris = new HashSet<>();
+            for (String fp : filepaths) {
+                try {
+                    Path path = fp.startsWith("file://") ? Path.of(URI.create(fp)) : Path.of(fp);
+                    allowedUris.add(path.toUri().toString());
+                } catch (Exception e) {
+                    allowedUris.add(fp);
+                }
+            }
+            matches = matches.stream()
+                    .filter(s -> allowedUris.contains(s.fileUri()))
                     .toList();
         }
 
@@ -267,6 +306,25 @@ public class WorkspaceContext {
         return returnTypeMatches.stream()
                 .filter(s -> nameRegex.matcher(s.name()).matches())
                 .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> extractFilepaths(Map<String, Object> referenced) {
+        Object fpObj = referenced.get("filepaths");
+        if (fpObj == null) return null;
+
+        List<String> result = new ArrayList<>();
+        if (fpObj instanceof List<?> fpList) {
+            for (Object item : fpList) {
+                if (item instanceof String s) {
+                    Collections.addAll(result, s.split("\\s+"));
+                }
+            }
+        } else if (fpObj instanceof String s) {
+            Collections.addAll(result, s.split("\\s+"));
+        }
+        result.removeIf(String::isEmpty);
+        return result.isEmpty() ? null : result;
     }
 
     private List<IndexedSymbol> queryAnnotated(String pattern, LocationType location,
@@ -374,36 +432,10 @@ public class WorkspaceContext {
 
     private DependencyResponse getDependenciesFromBuildTool() {
         String buildFileUri = Path.of(location, "pom.xml").toUri().toString();
-        DependencyLabeler labeler = new DependencyLabeler();
 
         DependencyList.Builder depList = DependencyList.newBuilder();
         for (BuildTool.ResolvedDependency dep : resolvedDeps) {
-            Dependency.Builder d = Dependency.newBuilder()
-                    .setName(dep.name())
-                    .setVersion(dep.version() != null ? dep.version() : "")
-                    .setIndirect(dep.indirect());
-
-            if (dep.classifier() != null) {
-                d.setClassifier(dep.classifier());
-            }
-
-            Struct.Builder extras = Struct.newBuilder()
-                    .putFields("groupId", Value.newBuilder().setStringValue(dep.groupId()).build())
-                    .putFields("artifactId", Value.newBuilder().setStringValue(dep.artifactId()).build());
-
-            if (dep.pomPath() != null) {
-                extras.putFields("pomPath", Value.newBuilder().setStringValue(dep.pomPath()).build());
-                d.setFileURIPrefix(Path.of(dep.pomPath()).toUri().toString());
-            }
-
-            d.setExtras(extras);
-
-            Map<String, String> labels = labeler.getLabels(dep);
-            for (Map.Entry<String, String> label : labels.entrySet()) {
-                d.addLabels(label.getKey() + "=" + label.getValue());
-            }
-
-            depList.addDeps(d);
+            depList.addDeps(toProtoDependency(dep));
         }
 
         DependencyResponse.Builder response = DependencyResponse.newBuilder()
@@ -414,6 +446,68 @@ public class WorkspaceContext {
 
         LOG.info("Returning {} resolved dependencies from {}", resolvedDeps.size(), buildTool.getType());
         return response.build();
+    }
+
+    public DependencyDAGResponse getDependenciesDAG() {
+        if (resolvedDag == null || resolvedDag.isEmpty()) {
+            return DependencyDAGResponse.newBuilder()
+                    .setSuccessful(true)
+                    .build();
+        }
+
+        String buildFileUri = Path.of(location, "pom.xml").toUri().toString();
+
+        FileDAGDep.Builder fileDag = FileDAGDep.newBuilder()
+                .setFileURI(buildFileUri);
+
+        for (BuildTool.DagEntry entry : resolvedDag) {
+            fileDag.addList(toProtoDagItem(entry));
+        }
+
+        return DependencyDAGResponse.newBuilder()
+                .setSuccessful(true)
+                .addFileDagDep(fileDag)
+                .build();
+    }
+
+    private DependencyDAGItem toProtoDagItem(BuildTool.DagEntry entry) {
+        DependencyDAGItem.Builder item = DependencyDAGItem.newBuilder()
+                .setKey(toProtoDependency(entry.dep()));
+
+        for (BuildTool.DagEntry child : entry.children()) {
+            item.addAddedDeps(toProtoDagItem(child));
+        }
+
+        return item.build();
+    }
+
+    private io.konveyor.provider.grpc.Dependency toProtoDependency(BuildTool.ResolvedDependency dep) {
+        io.konveyor.provider.grpc.Dependency.Builder d = io.konveyor.provider.grpc.Dependency.newBuilder()
+                .setName(dep.name())
+                .setVersion(dep.version() != null ? dep.version() : "")
+                .setIndirect(dep.indirect());
+
+        if (dep.classifier() != null) {
+            d.setClassifier(dep.classifier());
+        }
+
+        Struct.Builder extras = Struct.newBuilder()
+                .putFields("groupId", Value.newBuilder().setStringValue(dep.groupId()).build())
+                .putFields("artifactId", Value.newBuilder().setStringValue(dep.artifactId()).build());
+
+        if (dep.pomPath() != null) {
+            extras.putFields("pomPath", Value.newBuilder().setStringValue(dep.pomPath()).build());
+            d.setFileURIPrefix(Path.of(dep.pomPath()).toUri().toString());
+        }
+
+        d.setExtras(extras);
+
+        Map<String, String> labels = labeler.getLabels(dep);
+        for (Map.Entry<String, String> label : labels.entrySet()) {
+            d.addLabels(label.getKey() + "=" + label.getValue());
+        }
+
+        return d.build();
     }
 
     private DependencyResponse getDependenciesFromStaticParsing() {

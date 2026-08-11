@@ -473,6 +473,41 @@ class GrpcIntegrationTest {
 
         @Test
         @Order(14)
+        void shouldGetDependenciesDAG() {
+            Config config = Config.newBuilder()
+                    .setLocation(tempDir.toString())
+                    .setAnalysisMode("source-only")
+                    .build();
+
+            InitResponse initResponse = providerStub.init(config);
+            assertThat(initResponse.getSuccessful()).isTrue();
+
+            ServiceRequest request = ServiceRequest.newBuilder()
+                    .setId(initResponse.getId())
+                    .build();
+
+            DependencyDAGResponse response = providerStub.getDependenciesDAG(request);
+
+            assertThat(response.getSuccessful()).isTrue();
+            assertThat(response.getFileDagDepCount()).isEqualTo(1);
+            assertThat(response.getFileDagDep(0).getFileURI()).contains("pom.xml");
+
+            var topLevel = response.getFileDagDep(0).getListList();
+            assertThat(topLevel).isNotEmpty();
+
+            var topLevelNames = topLevel.stream()
+                    .map(item -> item.getKey().getName())
+                    .toList();
+            assertThat(topLevelNames).contains("javax.servlet.javax.servlet-api");
+            assertThat(topLevelNames).contains("javax.ejb.javax.ejb-api");
+
+            for (var item : topLevel) {
+                assertThat(item.getKey().getIndirect()).isFalse();
+            }
+        }
+
+        @Test
+        @Order(15)
         void shouldFailEvaluateForUnknownWorkspace() {
             EvaluateRequest request = EvaluateRequest.newBuilder()
                     .setId(99999)
@@ -491,7 +526,7 @@ class GrpcIntegrationTest {
         }
 
         @Test
-        @Order(15)
+        @Order(16)
         void shouldStopWorkspace() {
             ServiceRequest request = ServiceRequest.newBuilder()
                     .setId(workspaceId)

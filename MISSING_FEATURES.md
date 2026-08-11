@@ -4,157 +4,94 @@ This document catalogs features present in the Go-based Konveyor Java external p
 (`analyzer-lsp/external-providers/java-external-provider`) that are not yet implemented in
 `java-analyzer-provider`. These features are required for production parity.
 
----
-
-## ~~1. Decompilation (Vineflower)~~ DONE
-
-**Status: Implemented**
-
-Embedded Vineflower 1.10.1 as a library dependency. Uses `Fernflower` class directly with
-custom `DirectoryResultSaver` (implements `IResultSaver`) to write `.java` files to disk.
-Parallel decompilation via `ExecutorService` worker pool.
-
-**Implementation:**
-- `java-analyzer-provider/.../decompiler/VineflowerDecompiler.java` -- core decompiler with worker pool
-- `java-analyzer-provider/.../decompiler/ArchiveHandler.java` -- JAR/WAR/EAR handlers with recursive extraction
-- `java-analyzer-provider/.../decompiler/DecompilerService.java` -- interface
-- `java-analyzer-provider/.../decompiler/DecompileResult.java` -- result record
+Previously completed features (decompilation, Maven SHA index, build tool abstraction,
+dependency resolution, WAR/EAR archive handling, dependency labeling, `mvn://` artifact
+download, `includedPaths` config, `filepaths` condition parameter, `depOpenSourceLabelsFile`
+config wiring, Maven settings generation + proxy support, `GetDependenciesDAG`) have been
+removed from this list.
 
 ---
 
-## ~~2. Maven SHA Index Lookup~~ DONE
-
-**Status: Implemented**
-
-Binary search over sorted text file (`maven-index.txt`) mapping SHA1 → Maven coordinates.
-Uses `RandomAccessFile` for random access. Falls back gracefully when index file not found.
-
-**Implementation:**
-- `java-analyzer-provider/.../buildtool/MavenShaIndex.java` -- binary search, SHA1 computation, coordinate parsing
-
----
-
-## ~~3. Build Tool Abstraction (Maven + Gradle + Binary)~~ DONE
-
-**Status: Implemented**
-
-Unified `BuildTool` interface with Maven, Gradle, and Binary implementations. Detection
-priority: Gradle > Maven > Binary (matching Go provider). Runs actual build tool commands
-for transitive dependency resolution.
-
-**Implementation:**
-- `java-analyzer-provider/.../buildtool/BuildTool.java` -- interface with `Type` enum and `ResolvedDependency` record
-- `java-analyzer-provider/.../buildtool/BuildToolDetector.java` -- detection logic
-- `java-analyzer-provider/.../buildtool/MavenBuildTool.java` -- runs `mvn dependency:tree`, parses output
-- `java-analyzer-provider/.../buildtool/GradleBuildTool.java` -- runs `gradlew dependencies`, wrapper support
-- `java-analyzer-provider/.../buildtool/BinaryBuildTool.java` -- walks directory for archives
-
----
-
-## ~~4. Dependency Resolution (Source Download + Decompile Fallback)~~ DONE
-
-**Status: Implemented**
-
-Full pipeline: detect build tool → resolve deps → download source JARs (`mvn dependency:sources`)
-→ decompile missing sources via Vineflower → index all dependency sources.
-`IsDependencyIncident` flag set on incidents from dependency files.
-
-**Implementation:**
-- `java-analyzer-provider/.../buildtool/DependencyResolver.java` -- orchestrates source extraction + decompilation
-- `java-analyzer-provider/.../buildtool/DependencyLabeler.java` -- open-source vs internal classification
-- `java-analyzer-provider/.../index/SymbolIndex.java` -- `indexDependencyDirectory()` and `isDependencyFile()`
-- `java-analyzer-provider/.../WorkspaceContext.java` -- wired into `index()` flow
-
----
-
-## ~~5. WAR/EAR Archive Handling~~ DONE
-
-**Status: Implemented**
-
-JAR/WAR/EAR handlers with recursive extraction. WAR: decompiles WEB-INF/classes, collects
-WEB-INF/lib/*.jar as dependencies. EAR: recursively processes contained JARs/WARs.
-
-**Implementation:**
-- `java-analyzer-provider/.../decompiler/ArchiveHandler.java` -- `handleJar()`, `handleWar()`, `handleEar()`, `explode()`
-
----
-
-## 6. JDT Class File URI Resolution
+## 1. `depLabelSelector` / Open-Source Library Scope Filtering
 
 **Priority: Medium**
 
-Converts `konveyor-jdt://` URIs (returned by JDTLS for symbols found in dependencies) back
-to actual `.java` file paths on disk. Handles `source-range` query parameters and inner class
-markers (`$`).
+The Go provider reads a label selector from the condition context and uses it to decide
+whether dependency-sourced symbols should be included in query results. It passes
+`includeOpenSourceLibraries` to the JDTLS rule query command. This allows rules to match
+only in application code, excluding third-party library incidents.
 
 **Go implementation:**
-- `filter.go` `getURI()` (lines 147-240)
-- Delegates to `BuildTool.GetSourceFileLocation()` which may trigger on-demand `jar xf`
+- `service_client.go` — reads `depLabelSelector` from condition context
+- Calls `CanRestrictSelector()` to determine if open-source libraries should be excluded
+- Passes `includeOpenSourceLibraries` boolean to JDTLS
 
-**Note:** This is only relevant if the Java provider delegates to JDTLS. If java-analyzer-provider
-continues to do its own AST parsing, this URI scheme is not needed -- but the provider must
-still be able to resolve incidents found in decompiled dependency sources back to meaningful
-file paths.
+**Current state:** Not implemented. All indexed symbols (application + dependency) are always
+included in query results regardless of label selectors.
 
----
-
-## ~~7. Dependency Labeling~~ DONE
-
-**Status: Implemented**
-
-Labels dependencies as `konveyor.io/dep-source=open-source|internal`, adds
-`konveyor.io/language=java`, supports `konveyor.io/exclude` for filtering.
-Configurable via regex patterns file and exclude packages list.
-
-**Implementation:**
-- `java-analyzer-provider/.../buildtool/DependencyLabeler.java` -- classification logic, config loading
-- `java-analyzer-provider/.../WorkspaceContext.java` -- wired into `getDependenciesFromBuildTool()` response
+**Effort:** Medium — need to parse the selector, check dependency labels, and filter
+`SymbolIndex` query results accordingly.
 
 ---
 
-## 8. Maven Remote Artifact Download
-
-**Priority: Low**
-
-If `config.Location` starts with `mvn://`, downloads the artifact from a Maven repository
-before analysis begins.
-
-**Go implementation:**
-- `bldtool/maven_downloader.go` -- `Download()` method
-- Format: `mvn://<group>:<artifact>:<version>:<classifier>@<path>`
-
----
-
-## 9. Maven Settings Generation
-
-**Priority: Low**
-
-Generates/updates `~/.analyze/globalSettings.xml` with custom local repository path and
-HTTP/HTTPS proxy configuration.
-
-**Go implementation:**
-- `maven_settings.go` -- `BuildSettingsFile()`
-
-**Config:** `mavenCacheDir`, `proxy` in init config.
-
-**Why it matters:** Required for containerized/enterprise deployments with HTTP proxies or
-custom Maven cache directories.
-
----
-
-## 10. Bytecode Scanning (.class File Analysis)
+## 3. File Encoding Support
 
 **Priority: Medium**
 
-Reads `.class` files and extracts type references from the constant pool (class refs, field
-refs, method refs) without full decompilation. Faster than decompilation for initial scanning.
+The Go provider reads a file encoding setting from config and uses it when extracting code
+snippets. The Java provider always reads files as UTF-8.
 
-**Go implementation:** Not directly in the Go provider (JDTLS handles this). But useful as a
-complement/alternative to decompilation for quick dependency scanning.
+**Go implementation:**
+- `provider.go` Init — `provider.GetEncodingFromConfig(config)`
+- `snipper.go` — uses encoding when reading source files
+
+**Current state:** `CodeSnipService` uses `Files.readAllLines(path)` which defaults to UTF-8.
+
+**Effort:** Low — read encoding from config, pass `Charset` to file reading operations.
 
 ---
 
-## 11. Dependency Caching
+## 3. Binary Artifact Identification
+
+**Priority: Medium**
+
+The Go provider's binary build tool is significantly more sophisticated: it discovers embedded
+JARs inside WARs/EARs, creates synthetic Maven projects for resolution, and identifies
+artifacts via `pom.properties` files found inside JARs.
+
+**Go implementation:**
+- `bldtool/maven_binary.go` — full binary analysis pipeline
+- `dependency/artifact.go` — JAR identification via SHA, Maven index, pom.properties
+- `dependency/jar.go`, `jar_explode.go` — JAR analysis and extraction
+
+**Current state:** `BinaryBuildTool` assigns synthetic coordinates
+(`io.konveyor.embededdep` / `0.0.0-SNAPSHOT`) to all discovered archives. `MavenShaIndex`
+exists but is not used by `BinaryBuildTool` for identification.
+
+**Effort:** Medium — wire `MavenShaIndex` into `BinaryBuildTool`, add `pom.properties`
+extraction from JARs, improve embedded JAR discovery.
+
+---
+
+## 4. Multi-Module Maven Support
+
+**Priority: Medium**
+
+The Go provider handles Maven multi-module projects by discovering and merging dependency
+trees from submodules.
+
+**Go implementation:**
+- `bldtool/maven.go` — discovers `<modules>` in parent pom, runs `dependency:tree` per module
+- Merges results, handles inter-module dependencies
+
+**Current state:** `MavenBuildTool` processes only the root `pom.xml`. Multi-module projects
+will only report dependencies declared in the parent pom, missing module-specific dependencies.
+
+**Effort:** Medium.
+
+---
+
+## 5. Dependency Caching
 
 **Priority: Low**
 
@@ -162,57 +99,69 @@ Caches dependency resolution results keyed by SHA256 hash of the build file (`po
 `build.gradle`). Avoids re-running expensive Maven/Gradle commands on unchanged projects.
 
 **Go implementation:**
-- `bldtool/dep_cache.go`
+- `bldtool/dep_cache.go` — hash-based cache with file-system persistence
+
+**Current state:** Not implemented. Dependencies are re-resolved on every `Init` call.
+
+**Effort:** Low.
 
 ---
 
-## 12. Filepath-Scoped Evaluation
+## 6. Gradle-Specific Features
 
-**Priority: Medium**
+**Priority: Low** (Maven dominates Konveyor's target workloads)
 
-Evaluation can be scoped to specific file paths via `includedPaths` in provider config and
-per-condition `filepaths` constraints. The Go provider runs a parallel file search to
-determine which files to include.
+The Go provider has extensive Gradle support beyond what the Java provider implements:
+
+- Custom Gradle task files (`gradletasks/tasks.go`) for better dependency extraction
+- Gradle wrapper version detection and Java version compatibility
+- Source download for Gradle dependencies via custom tasks
+- Subproject discovery via `gradlew projects`
+- Gradle 9+ support (removal of deprecated flags)
 
 **Go implementation:**
-- `service_client.go` `GetAllSymbols()` lines 158-298
-- Provider-level `includedPaths`, rule-scope included/excluded paths, condition-level `filepaths`
+- `bldtool/gradle.go` (555+ lines)
+- `dependency/gradle_resolver.go`
+- `gradletasks/tasks.go` — embedded `.gradle` scripts
 
-**Current state in java-analyzer-provider:** Not implemented. All files in the workspace are included
-in query results.
+**Current state:** `GradleBuildTool` runs `gradle dependencies --configuration compileClasspath`
+and parses output. No custom tasks, no source download, no subproject handling.
+
+**Effort:** Medium.
 
 ---
 
-## 13. Rule Query Timeout
+## 7. `NotifyFileChanges`
 
 **Priority: Low**
 
-Configurable timeout for individual rule queries to prevent hangs on pathological patterns.
+The Go provider forwards file change notifications to service clients for incremental
+re-indexing. Matters for IDE-like incremental workflows but not for batch analysis runs.
 
-**Go implementation:** `ruleQueryTimeout` provider setting (default varies, e.g., "15m").
+**Go implementation:**
+- `provider.go` — delegates to `provider.FullNotifyFileChangesResponse`
+
+**Current state:** `JavaProviderService.notifyFileChanges()` returns an empty response.
+
+**Effort:** Low — re-index changed files in `SymbolIndex`.
 
 ---
 
-## 14. Gradle-Specific Features
+## Not Gaps (Architectural Differences or Dead Code)
 
-**Priority: Medium** (if Gradle projects are in scope)
-
-- Subproject discovery via `gradlew projects`
-- Gradle wrapper enforcement (never uses system Gradle)
-- Java version compatibility (Gradle <= 8.14 uses `JAVA8_HOME`)
-- Gradle 9+ support (removal of `--build-file`, `--no-configuration-cache`)
-- Pre-resolution via custom `konveyorResolveDependencies` task
-- Custom task injection into `build.gradle`
-
-**Go implementation:** `bldtool/gradle.go`, `dependency/gradle_resolver.go`, `gradletasks/tasks.go`
+| Go Provider Feature | Why not a gap |
+|---|---|
+| JDT Class File URI Resolution (`konveyor-jdt://`) | JDTLS-specific; Java provider uses AST directly |
+| `ruleQueryTimeout` | Only relevant to JDTLS approach |
+| JDTLS process management / `$/progress` tracking | Architectural difference — Java provider embeds JDT Core |
+| `excludePackages` in evaluation flow | Dead code in Go provider (defined but never called) |
+| Bytecode scanning (.class analysis) | Not in Go provider either (JDTLS handles internally) |
 
 ---
 
 ## Summary
 
-| Status | Features |
-|--------|----------|
-| **Done**    | ~~1. Decompilation~~, ~~2. Maven SHA Index~~, ~~3. Build Tool Abstraction~~, ~~4. Dependency Resolution~~, ~~5. WAR/EAR Archives~~, ~~7. Dependency Labeling~~ |
-| **Pending** | 6. URI Resolution (Medium), 10. Bytecode Scanning (Medium), 12. Filepath Scoping (Medium), 14. Gradle Features (Medium) |
-| **Low**     | 8. Remote Artifact Download, 9. Maven Settings, 11. Dependency Caching, 13. Query Timeout |
-
+| Priority | Features |
+|----------|----------|
+| **Medium** | 1. `depLabelSelector` filtering, 2. File encoding, 3. Binary artifact ID, 4. Multi-module Maven |
+| **Low** | 5. Dependency caching, 6. Gradle features, 7. `NotifyFileChanges` |

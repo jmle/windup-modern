@@ -9,6 +9,9 @@ import io.konveyor.provider.grpc.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -65,6 +68,9 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
                 location = downloaded.toString();
                 LOG.info("Downloaded mvn artifact to {}", location);
             }
+
+            configureProxy(request);
+            configureMavenSettings(request);
 
             WorkspaceContext ctx = new WorkspaceContext(id, location, analysisMode, request, contextLines);
             ctx.index();
@@ -159,9 +165,26 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
     @Override
     public void getDependenciesDAG(ServiceRequest request, StreamObserver<DependencyDAGResponse> responseObserver) {
         long id = request.getId();
-        responseObserver.onNext(DependencyDAGResponse.newBuilder()
-                .setSuccessful(true)
-                .build());
+        WorkspaceContext ctx = workspaces.get(id);
+        if (ctx == null) {
+            responseObserver.onNext(DependencyDAGResponse.newBuilder()
+                    .setSuccessful(false)
+                    .setError("unknown workspace id: " + id)
+                    .build());
+            responseObserver.onCompleted();
+            return;
+        }
+
+        try {
+            DependencyDAGResponse result = ctx.getDependenciesDAG();
+            responseObserver.onNext(result);
+        } catch (Exception e) {
+            LOG.error("GetDependenciesDAG failed id={}", id, e);
+            responseObserver.onNext(DependencyDAGResponse.newBuilder()
+                    .setSuccessful(false)
+                    .setError(e.getMessage())
+                    .build());
+        }
         responseObserver.onCompleted();
     }
 
@@ -180,5 +203,74 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
     @Override
     public void streamPrepareProgress(PrepareProgressRequest request, StreamObserver<ProgressEvent> responseObserver) {
         responseObserver.onCompleted();
+    }
+
+    private void configureProxy(Config config) {
+        if (!config.hasProxy()) return;
+        Proxy proxy = config.getProxy();
+
+        if (!proxy.getHTTPProxy().isEmpty()) {
+            try {
+                URI uri = new URI(proxy.getHTTPProxy());
+                if (uri.getHost() != null) {
+                    System.setProperty("http.proxyHost", uri.getHost());
+                    System.setProperty("http.proxyPort",
+                            String.valueOf(uri.getPort() > 0 ? uri.getPort() : 80));
+                }
+            } catch (URISyntaxException e) {
+                LOG.warn("Invalid HTTP proxy URL: {}", proxy.getHTTPProxy());
+            }
+        }
+
+        if (!proxy.getHTTPSProxy().isEmpty()) {
+            try {
+                URI uri = new URI(proxy.getHTTPSProxy());
+                if (uri.getHost() != null) {
+                    System.setProperty("https.proxyHost", uri.getHost());
+                    System.setProperty("https.proxyPort",
+                            String.valueOf(uri.getPort() > 0 ? uri.getPort() : 443));
+                }
+            } catch (URISyntaxException e) {
+                LOG.warn("Invalid HTTPS proxy URL: {}", proxy.getHTTPSProxy());
+            }
+        }
+
+        if (!proxy.getNoProxy().isEmpty()) {
+            String nonProxyHosts = proxy.getNoProxy()
+                    .replace(",", "|")
+                    .replaceAll("\\s+", "");
+            System.setProperty("http.nonProxyHosts", nonProxyHosts);
+        }
+
+        LOG.info("Configured proxy settings");
+    }
+
+    private void configureMavenSettings(Config config) {
+        String mavenCacheDir = WorkspaceContext.extractStringConfig(config, "mavenCacheDir");
+
+        if (mavenCacheDir != null) {
+            System.setProperty("maven.repo.local", mavenCacheDir);
+            LOG.info("Using custom Maven local repository: {}", mavenCacheDir);
+        }
+
+        String httpProxy = null;
+        String httpsProxy = null;
+        String noProxy = null;
+        if (config.hasProxy()) {
+            Proxy proxy = config.getProxy();
+            httpProxy = proxy.getHTTPProxy().isEmpty() ? null : proxy.getHTTPProxy();
+            httpsProxy = proxy.getHTTPSProxy().isEmpty() ? null : proxy.getHTTPSProxy();
+            noProxy = proxy.getNoProxy().isEmpty() ? null : proxy.getNoProxy();
+        }
+
+        if (mavenCacheDir != null || httpProxy != null || httpsProxy != null) {
+            try {
+                MavenSettingsGenerator generator = new MavenSettingsGenerator();
+                Path settingsFile = generator.generate(mavenCacheDir, httpProxy, httpsProxy, noProxy);
+                LOG.info("Maven global settings written to {}", settingsFile);
+            } catch (IOException e) {
+                LOG.warn("Failed to generate Maven settings: {}", e.getMessage());
+            }
+        }
     }
 }

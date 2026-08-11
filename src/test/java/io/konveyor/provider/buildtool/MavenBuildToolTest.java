@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,5 +53,32 @@ class MavenBuildToolTest {
         MavenBuildTool tool = new MavenBuildTool();
         assertThat(tool.getType()).isEqualTo(BuildTool.Type.MAVEN);
         assertThat(tool.getLocalRepoPath()).isNotNull();
+    }
+
+    @Test
+    void flattenDagPreservesAllNodes() {
+        var leaf1 = new BuildTool.DagEntry(
+                new BuildTool.ResolvedDependency("g", "leaf1", "1.0", null, "compile", null, false, true, null),
+                List.of());
+        var leaf2 = new BuildTool.DagEntry(
+                new BuildTool.ResolvedDependency("g", "leaf2", "2.0", null, "compile", null, false, true, null),
+                List.of());
+        var mid = new BuildTool.DagEntry(
+                new BuildTool.ResolvedDependency("g", "mid", "1.0", null, "compile", null, false, true, null),
+                List.of(leaf2));
+        var root = new BuildTool.DagEntry(
+                new BuildTool.ResolvedDependency("g", "root", "1.0", null, "compile", null, false, false, null),
+                List.of(leaf1, mid));
+
+        List<BuildTool.ResolvedDependency> flat = BuildTool.flattenDag(List.of(root));
+
+        assertThat(flat).hasSize(4);
+        assertThat(flat.stream().map(BuildTool.ResolvedDependency::artifactId).toList())
+                .containsExactly("root", "leaf1", "mid", "leaf2");
+    }
+
+    @Test
+    void flattenDagEmptyReturnsEmpty() {
+        assertThat(BuildTool.flattenDag(List.of())).isEmpty();
     }
 }

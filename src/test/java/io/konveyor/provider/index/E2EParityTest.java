@@ -5,6 +5,8 @@ import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.konveyor.provider.WorkspaceContext;
 import io.konveyor.provider.grpc.Config;
+import io.konveyor.provider.grpc.DependencyDAGItem;
+import io.konveyor.provider.grpc.DependencyDAGResponse;
 import io.konveyor.provider.grpc.IncidentContext;
 import io.konveyor.provider.grpc.ProviderEvaluateResponse;
 import org.junit.jupiter.api.BeforeAll;
@@ -115,6 +117,22 @@ class E2EParityTest {
             for (var e : elements) {
                 sb.append("      - name: ").append(e.getKey()).append("\n");
                 sb.append("        value: '").append(e.getValue()).append("'\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    static String referencedWithFilepaths(String pattern, String location,
+                                            List<String> filepaths) {
+        StringBuilder sb = new StringBuilder("referenced:\n  pattern: '");
+        sb.append(pattern).append("'\n");
+        if (location != null && !location.isEmpty()) {
+            sb.append("  location: ").append(location).append("\n");
+        }
+        if (filepaths != null && !filepaths.isEmpty()) {
+            sb.append("  filepaths:\n");
+            for (String fp : filepaths) {
+                sb.append("    - ").append(fp).append("\n");
             }
         }
         return sb.toString();
@@ -256,6 +274,50 @@ class E2EParityTest {
         assertThat(incidents).hasSize(1);
         assertThat(var(incidents.get(0), "name")).isEqualTo("io.fabric8.kubernetes-client");
         assertThat(var(incidents.get(0), "version")).isEqualTo("6.0.0");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  GetDependenciesDAG: tree structure from Maven dependency resolution
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void getDependenciesDAG_returnsTreeStructure() {
+        DependencyDAGResponse dag = javaCtx.getDependenciesDAG();
+
+        assertThat(dag.getSuccessful()).isTrue();
+        assertThat(dag.getFileDagDepCount()).isEqualTo(1);
+        assertThat(dag.getFileDagDep(0).getFileURI()).contains("pom.xml");
+
+        var topLevel = dag.getFileDagDep(0).getListList();
+        assertThat(topLevel).isNotEmpty();
+
+        var topLevelNames = topLevel.stream()
+                .map(item -> item.getKey().getName())
+                .toList();
+        assertThat(topLevelNames).contains("io.fabric8.kubernetes-client");
+
+        for (var item : topLevel) {
+            assertThat(item.getKey().getIndirect()).isFalse();
+            assertThat(item.getKey().getName()).isNotEmpty();
+            assertThat(item.getKey().getVersion()).isNotEmpty();
+        }
+
+        assertThat(allDagDepsIndirectExceptTopLevel(topLevel)).isTrue();
+    }
+
+    private boolean allDagDepsIndirectExceptTopLevel(List<DependencyDAGItem> topLevel) {
+        for (DependencyDAGItem item : topLevel) {
+            if (!allChildrenIndirect(item.getAddedDepsList())) return false;
+        }
+        return true;
+    }
+
+    private boolean allChildrenIndirect(List<DependencyDAGItem> items) {
+        for (DependencyDAGItem child : items) {
+            if (!child.getKey().getIndirect()) return false;
+            if (!allChildrenIndirect(child.getAddedDepsList())) return false;
+        }
+        return true;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -906,5 +968,58 @@ class E2EParityTest {
         assertThat(incidents).hasSize(1);
         assertThat(incidents.get(0).getLineNumber()).isEqualTo(3);
         assertThat(var(incidents.get(0), "name")).isEqualTo("TypedEntity");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  filepaths condition parameter: restrict results to specific files
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void filepathsFilter_restrictToSingleFile() {
+        // Without filepaths, "do*" METHOD matches in both HomeController and HomeService
+        ProviderEvaluateResponse unrestricted = tilesCtx.evaluate("referenced",
+                referenced("do*", "METHOD"));
+        assertThat(unrestricted.getMatched()).isTrue();
+        assertThat(unrestricted.getIncidentContextsCount()).isGreaterThanOrEqualTo(3);
+
+        // With filepaths, restrict to only HomeService.java
+        Path homeServicePath = EXAMPLES_ROOT.resolve(
+                "sample-tiles-app/src/main/java/com/example/service/HomeService.java");
+        ProviderEvaluateResponse restricted = tilesCtx.evaluate("referenced",
+                referencedWithFilepaths("do*", "METHOD",
+                        List.of(homeServicePath.toAbsolutePath().toString())));
+
+        assertThat(restricted.getMatched()).isTrue();
+        var incidents = restricted.getIncidentContextsList();
+        assertThat(incidents).allMatch(ic -> ic.getFileURI().contains("HomeService.java"));
+        assertThat(incidents.stream().map(ic -> var(ic, "name")).toList())
+                .containsOnly("doStuff", "doThings");
+    }
+
+    @Test
+    void filepathsFilter_noMatchReturnsUnmatched() {
+        // Restrict to a file that has no matches for the pattern
+        Path typedEntityPath = EXAMPLES_ROOT.resolve(
+                "sample-tiles-app/src/main/java/com/example/model/TypedEntity.java");
+        ProviderEvaluateResponse resp = tilesCtx.evaluate("referenced",
+                referencedWithFilepaths("do*", "METHOD",
+                        List.of(typedEntityPath.toAbsolutePath().toString())));
+
+        assertThat(resp.getMatched()).isFalse();
+    }
+
+    @Test
+    void filepathsFilter_withFileUri() {
+        // Pass filepaths as file:// URIs (the format returned by evaluate results)
+        Path homeServicePath = EXAMPLES_ROOT.resolve(
+                "sample-tiles-app/src/main/java/com/example/service/HomeService.java");
+        String fileUri = homeServicePath.toAbsolutePath().toUri().toString();
+
+        ProviderEvaluateResponse resp = tilesCtx.evaluate("referenced",
+                referencedWithFilepaths("do*", "METHOD", List.of(fileUri)));
+
+        assertThat(resp.getMatched()).isTrue();
+        assertThat(resp.getIncidentContextsList())
+                .allMatch(ic -> ic.getFileURI().contains("HomeService.java"));
     }
 }
