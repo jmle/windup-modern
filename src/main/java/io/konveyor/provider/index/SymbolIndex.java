@@ -3,6 +3,7 @@ package io.konveyor.provider.index;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.FileASTRequestor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,7 +11,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.*;
 import java.util.regex.Pattern;
 
 /**
@@ -29,7 +30,9 @@ public class SymbolIndex {
             "org.eclipse.jdt.core.compiler.codegen.targetPlatform", "17"
     );
 
-    private final List<IndexedSymbol> allSymbols = new CopyOnWriteArrayList<>();
+    private static final int BATCH_SIZE = 64;
+
+    private final List<IndexedSymbol> allSymbols = new ArrayList<>();
     private final Map<LocationType, List<IndexedSymbol>> byLocation = new EnumMap<>(LocationType.class);
     private final Set<String> dependencyFileUris = new HashSet<>();
 
@@ -42,41 +45,13 @@ public class SymbolIndex {
             throw new IOException("Not a directory: " + root);
         }
 
-        List<Path> javaFiles = new ArrayList<>();
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                if (file.toString().endsWith(".java")) {
-                    if (includedPaths.isEmpty() || matchesIncludedPath(root, file, includedPaths)) {
-                        javaFiles.add(file);
-                    }
-                }
-                return FileVisitResult.CONTINUE;
-            }
-        });
-
+        List<Path> javaFiles = collectJavaFiles(root, includedPaths);
         LOG.info("Parsing {} Java files in {}", javaFiles.size(), root);
 
-        for (Path file : javaFiles) {
-            try {
-                indexFile(file);
-            } catch (Exception e) {
-                LOG.warn("Failed to parse {}: {}", file, e.getMessage());
-            }
-        }
+        List<IndexedSymbol> parsed = parseFilesParallel(javaFiles);
+        mergeSymbols(parsed);
 
         LOG.info("Indexed {} symbols across {} files", allSymbols.size(), javaFiles.size());
-    }
-
-    private static boolean matchesIncludedPath(Path root, Path file, List<String> includedPaths) {
-        Path relative = root.resolve(".").normalize().relativize(file.normalize());
-        String relStr = relative.toString();
-        for (String included : includedPaths) {
-            if (relStr.equals(included) || relStr.endsWith(included)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public void indexDependencyDirectory(Path root) throws IOException {
@@ -98,21 +73,115 @@ public class SymbolIndex {
 
         LOG.info("Parsing {} dependency Java files in {}", javaFiles.size(), root);
 
-        for (Path file : javaFiles) {
-            try {
-                indexFile(file);
-            } catch (Exception e) {
-                LOG.warn("Failed to parse dependency file {}: {}", file, e.getMessage());
-            }
-        }
+        List<IndexedSymbol> parsed = parseFilesParallel(javaFiles);
+        mergeSymbols(parsed);
 
         LOG.info("Indexed {} total symbols (including dependencies)", allSymbols.size());
     }
 
-    public boolean isDependencyFile(String fileUri) {
-        return dependencyFileUris.contains(fileUri);
+    private List<Path> collectJavaFiles(Path root, List<String> includedPaths) throws IOException {
+        List<Path> javaFiles = new ArrayList<>();
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (file.toString().endsWith(".java")) {
+                    if (includedPaths.isEmpty() || matchesIncludedPath(root, file, includedPaths)) {
+                        javaFiles.add(file);
+                    }
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return javaFiles;
     }
 
+    /**
+     * Parses files in parallel using JDT batch API. Files are partitioned into chunks,
+     * and each chunk is processed with {@link ASTParser#createASTs} which reuses internal
+     * compiler state across files within the chunk. Chunks run concurrently via ForkJoinPool.
+     */
+    private List<IndexedSymbol> parseFilesParallel(List<Path> javaFiles) {
+        if (javaFiles.isEmpty()) {
+            return List.of();
+        }
+
+        if (javaFiles.size() <= BATCH_SIZE) {
+            return parseBatch(javaFiles);
+        }
+
+        List<List<Path>> chunks = partitionList(javaFiles, BATCH_SIZE);
+        ForkJoinPool pool = new ForkJoinPool(
+                Math.min(chunks.size(), Runtime.getRuntime().availableProcessors()));
+
+        try {
+            List<Future<List<IndexedSymbol>>> futures = new ArrayList<>();
+            for (List<Path> chunk : chunks) {
+                futures.add(pool.submit(() -> parseBatch(chunk)));
+            }
+
+            List<IndexedSymbol> result = new ArrayList<>(javaFiles.size() * 10);
+            for (Future<List<IndexedSymbol>> future : futures) {
+                result.addAll(future.get());
+            }
+            return result;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parsing interrupted", e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException("Parsing failed", e.getCause());
+        } finally {
+            pool.shutdown();
+        }
+    }
+
+    /**
+     * Parses a batch of files using JDT's batch API, which reuses internal compiler
+     * state (scanner, name tables) across files for better performance than creating
+     * a new ASTParser per file.
+     */
+    private List<IndexedSymbol> parseBatch(List<Path> files) {
+        String[] sourcePaths = new String[files.size()];
+        String[] encodings = new String[files.size()];
+        for (int i = 0; i < files.size(); i++) {
+            sourcePaths[i] = files.get(i).toAbsolutePath().toString();
+            encodings[i] = "UTF-8";
+        }
+
+        ASTParser parser = ASTParser.newParser(AST.JLS17);
+        parser.setKind(ASTParser.K_COMPILATION_UNIT);
+        parser.setCompilerOptions(COMPILER_OPTIONS);
+        parser.setResolveBindings(false);
+
+        List<IndexedSymbol> batchSymbols = new ArrayList<>();
+
+        parser.createASTs(sourcePaths, encodings, new String[0], new FileASTRequestor() {
+            @Override
+            public void acceptAST(String sourceFilePath, CompilationUnit cu) {
+                try {
+                    String fileUri = Path.of(sourceFilePath).toUri().toString();
+                    SymbolCollector collector = new SymbolCollector(cu, fileUri);
+                    cu.accept(collector);
+                    batchSymbols.addAll(collector.getSymbols());
+                } catch (Exception e) {
+                    LOG.warn("Failed to parse {}: {}", sourceFilePath, e.getMessage());
+                }
+            }
+        }, null);
+
+        return batchSymbols;
+    }
+
+    private synchronized void mergeSymbols(List<IndexedSymbol> symbols) {
+        allSymbols.addAll(symbols);
+        for (IndexedSymbol sym : symbols) {
+            byLocation.computeIfAbsent(sym.location(), k -> new ArrayList<>()).add(sym);
+        }
+    }
+
+    /**
+     * Indexes a single file. Used by tests; production code uses
+     * {@link #parseFilesParallel} for batch processing.
+     */
     public void indexFile(Path file) throws IOException {
         String source = Files.readString(file);
         String fileUri = file.toUri().toString();
@@ -129,11 +198,11 @@ public class SymbolIndex {
         cu.accept(collector);
 
         List<IndexedSymbol> fileSymbols = collector.getSymbols();
-        allSymbols.addAll(fileSymbols);
+        mergeSymbols(fileSymbols);
+    }
 
-        for (IndexedSymbol sym : fileSymbols) {
-            byLocation.computeIfAbsent(sym.location(), k -> new ArrayList<>()).add(sym);
-        }
+    public boolean isDependencyFile(String fileUri) {
+        return dependencyFileUris.contains(fileUri);
     }
 
     public List<IndexedSymbol> query(String pattern, LocationType location) {
@@ -389,5 +458,24 @@ public class SymbolIndex {
         }
         regex.append("$");
         return Pattern.compile(regex.toString());
+    }
+
+    private static <T> List<List<T>> partitionList(List<T> list, int chunkSize) {
+        List<List<T>> partitions = new ArrayList<>();
+        for (int i = 0; i < list.size(); i += chunkSize) {
+            partitions.add(list.subList(i, Math.min(i + chunkSize, list.size())));
+        }
+        return partitions;
+    }
+
+    private static boolean matchesIncludedPath(Path root, Path file, List<String> includedPaths) {
+        Path relative = root.resolve(".").normalize().relativize(file.normalize());
+        String relStr = relative.toString();
+        for (String included : includedPaths) {
+            if (relStr.equals(included) || relStr.endsWith(included)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
