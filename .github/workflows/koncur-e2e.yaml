@@ -1,0 +1,89 @@
+name: Koncur E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  koncur-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build fat JAR
+        run: mvn package -DskipTests -q
+
+      - name: Build Java provider image
+        run: podman build -f Dockerfile.kantra -t localhost/java-provider:test .
+
+      - name: Add local bin to PATH
+        run: |
+          mkdir -p $HOME/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install kantra
+        run: |
+          podman cp $(podman create --name kantra-extract quay.io/konveyor/kantra:latest):/usr/local/bin/kantra . && \
+            podman rm kantra-extract
+          install -m 755 kantra $HOME/.local/bin/kantra
+          rm kantra
+
+      - name: Configure container networking
+        run: |
+          mkdir -p $HOME/.config/containers
+          cat > $HOME/.config/containers/containers.conf << 'EOF'
+          [network]
+          network_cmd_options = ["allow_host_loopback=true"]
+          EOF
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Clone and build koncur
+        run: |
+          git clone --depth 1 https://github.com/konveyor/koncur.git /tmp/koncur
+          cd /tmp/koncur
+          go build -o $HOME/.local/bin/koncur ./cmd/koncur/main.go
+
+      - name: Create target config
+        run: |
+          mkdir -p /tmp/koncur/.koncur/config
+          cat > /tmp/koncur/.koncur/config/target-kantra.yaml << 'EOF'
+          type: kantra
+          kantra:
+            javaProviderImage: localhost/java-provider:test
+          EOF
+
+      - name: Run koncur tests
+        working-directory: /tmp/koncur
+        env:
+          SKIP_MAVEN: "true"
+        run: koncur run tests -t kantra -o yaml --output-file results.yaml
+
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koncur-output
+          path: /tmp/koncur/.koncur/output
+          retention-days: 5
+          include-hidden-files: true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koncur-results
+          path: /tmp/koncur/results.yaml
+          retention-days: 5
