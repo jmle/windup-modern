@@ -13,6 +13,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory index of all Java symbols extracted from source files. Supports querying by
@@ -31,6 +32,7 @@ public class SymbolIndex {
     );
 
     private static final int BATCH_SIZE = 64;
+    private static final Map<String, Pattern> PATTERN_CACHE = new ConcurrentHashMap<>();
 
     private final List<IndexedSymbol> allSymbols = new ArrayList<>();
     private final Map<LocationType, List<IndexedSymbol>> byLocation = new EnumMap<>(LocationType.class);
@@ -433,6 +435,10 @@ public class SymbolIndex {
     }
 
     public static Pattern globToRegex(String glob) {
+        return PATTERN_CACHE.computeIfAbsent(glob, SymbolIndex::compileGlob);
+    }
+
+    private static Pattern compileGlob(String glob) {
         StringBuilder regex = new StringBuilder("^");
         for (int i = 0; i < glob.length(); i++) {
             char c = glob.charAt(i);

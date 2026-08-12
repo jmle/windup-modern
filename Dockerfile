@@ -24,4 +24,4 @@ USER 1001
 ENV HOME=/addon
 EXPOSE 14651
 
-ENTRYPOINT ["java", "-jar", "/usr/local/bin/java-provider.jar", "--port", "14651"]
+ENTRYPOINT ["java", "-XX:+UseZGC", "-XX:+ZGenerational", "-jar", "/usr/local/bin/java-provider.jar", "--port", "14651"]
