@@ -106,7 +106,7 @@ The Java provider's deployment is **47% smaller** since it embeds JDT Core and d
 | Peak provider RSS | 1,119 MB | 1,293 MB | +15% |
 | Peak threads | 50 | 50 | ~0% |
 
-The parallel parsing optimizations reduced wall time by ~6s (init/indexing from ~4s to ~2s). CPU time is unchanged because the parsing phase is only 2-3% of total runtime -- the kantra engine's sequential rule evaluation (1,075 rules via gRPC) dominates at 92% of wall time. The memory increase comes from ForkJoinPool allocating multiple parser instances concurrently.
+The parallel parsing optimizations reduced wall time by ~6s (init/indexing from ~4s to ~2s). CPU time is unchanged because the parsing phase is only 2-3% of total runtime -- rule evaluation (1,075 rules via gRPC) dominates at 92% of wall time. The engine evaluates rules in parallel (10-worker pool), but OR conditions within individual rules are sequential, causing 1-5s stalls on multi-condition dependency rules. The memory increase comes from ForkJoinPool allocating multiple parser instances concurrently.
 
 ## Summary
 
@@ -121,4 +121,4 @@ The parallel parsing optimizations reduced wall time by ~6s (init/indexing from 
 | Deployment size | 69 MB | 36 MB | **Java** (48% smaller) |
 | Stability | Crashes without JAVA8_HOME | Clean runs | **Java** |
 
-The Go+JDTLS stack is significantly faster in wall-clock and CPU time -- JDTLS is a highly optimized language server. The Java provider wins on memory efficiency, architectural simplicity (single process), deployment size, and stability. The CPU efficiency gap is the main area for optimization in the Java provider, but most of the wall time (92%) is spent in the kantra engine's rule evaluation, not in the provider itself.
+The Go+JDTLS stack is significantly faster in wall-clock and CPU time -- JDTLS is a highly optimized language server. The Java provider wins on memory efficiency, architectural simplicity (single process), deployment size, and stability. The CPU efficiency gap is the main area for optimization in the Java provider. Most of the wall time (92%) is spent in rule evaluation; the engine parallelizes rules across 10 workers, but OR conditions within individual multi-condition rules are evaluated sequentially, creating the dominant bottleneck.

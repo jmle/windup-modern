@@ -29,9 +29,14 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
     private final int contextLines;
     private final AtomicLong nextId = new AtomicLong(1);
     private final Map<Long, WorkspaceContext> workspaces = new ConcurrentHashMap<>();
+    private CodeSnipService codeSnipService;
 
     public JavaProviderService(int contextLines) {
         this.contextLines = contextLines;
+    }
+
+    public void setCodeSnipService(CodeSnipService codeSnipService) {
+        this.codeSnipService = codeSnipService;
     }
 
     @Override
@@ -71,6 +76,7 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
 
             configureProxy(request);
             configureMavenSettings(request);
+            configureEncoding(request);
 
             WorkspaceContext ctx = new WorkspaceContext(id, location, analysisMode, request, contextLines);
             ctx.index();
@@ -243,6 +249,13 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
         }
 
         LOG.info("Configured proxy settings");
+    }
+
+    private void configureEncoding(Config config) {
+        String encoding = WorkspaceContext.extractStringConfig(config, "encoding");
+        if (encoding != null && codeSnipService != null) {
+            codeSnipService.setEncoding(encoding);
+        }
     }
 
     private void configureMavenSettings(Config config) {

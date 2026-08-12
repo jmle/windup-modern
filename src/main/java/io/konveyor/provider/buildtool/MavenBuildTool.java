@@ -60,15 +60,28 @@ public class MavenBuildTool implements BuildTool {
         }
 
         try {
-            DependencyNode root = collectDependencyTree(projectDir);
-            if (root == null) return List.of();
-
             String pomPath = pomFile.toAbsolutePath().toString();
             Path localRepo = getLocalRepoPath();
 
-            List<DagEntry> dag = new ArrayList<>();
-            for (DependencyNode directChild : root.getChildren()) {
-                dag.add(buildDagEntry(directChild, localRepo, pomPath, false));
+            List<DagEntry> dag = collectDagFromPom(projectDir, pomPath, localRepo);
+
+            Model model = parsePom(pomFile);
+            if (model.getModules() != null && !model.getModules().isEmpty()) {
+                for (String module : model.getModules()) {
+                    Path moduleDir = projectDir.resolve(module);
+                    Path modulePom = moduleDir.resolve("pom.xml");
+                    if (!Files.exists(modulePom)) {
+                        LOG.debug("Module pom not found: {}", modulePom);
+                        continue;
+                    }
+                    try {
+                        List<DagEntry> moduleDag = collectDagFromPom(moduleDir, pomPath, localRepo, model);
+                        dag.addAll(moduleDag);
+                        LOG.debug("Collected {} dependencies from module {}", moduleDag.size(), module);
+                    } catch (Exception e) {
+                        LOG.warn("Failed to resolve module {}: {}", module, e.getMessage());
+                    }
+                }
             }
 
             LOG.info("Resolved {} top-level Maven dependencies from {}", dag.size(), projectDir);
@@ -80,25 +93,62 @@ public class MavenBuildTool implements BuildTool {
         }
     }
 
+    private List<DagEntry> collectDagFromPom(Path projectDir, String pomPath, Path localRepo) throws Exception {
+        return collectDagFromPom(projectDir, pomPath, localRepo, null);
+    }
+
+    private List<DagEntry> collectDagFromPom(Path projectDir, String pomPath, Path localRepo, Model parentModel) throws Exception {
+        DependencyNode root = collectDependencyTree(projectDir, parentModel);
+        if (root == null) return new ArrayList<>();
+
+        List<DagEntry> dag = new ArrayList<>();
+        for (DependencyNode directChild : root.getChildren()) {
+            dag.add(buildDagEntry(directChild, localRepo, pomPath, false));
+        }
+        return dag;
+    }
+
     DependencyNode collectDependencyTree(Path projectDir) throws Exception {
+        return collectDependencyTree(projectDir, null);
+    }
+
+    DependencyNode collectDependencyTree(Path projectDir, Model parentModel) throws Exception {
         Path pomFile = projectDir.resolve("pom.xml");
         Model model = parsePom(pomFile);
         if (model.getDependencies().isEmpty()) {
             return null;
         }
 
+        java.util.Properties properties = buildProperties(model, parentModel);
+
         RepositorySystem repoSystem = newRepositorySystem();
         DefaultRepositorySystemSession session = newSession(repoSystem);
         List<RemoteRepository> remoteRepos = buildRemoteRepos(model);
+        if (parentModel != null) {
+            for (RemoteRepository repo : buildRemoteRepos(parentModel)) {
+                if (remoteRepos.stream().noneMatch(r -> r.getId().equals(repo.getId()))) {
+                    remoteRepos.add(repo);
+                }
+            }
+        }
 
         CollectRequest collectRequest = new CollectRequest();
         collectRequest.setRepositories(remoteRepos);
 
         for (org.apache.maven.model.Dependency modelDep : model.getDependencies()) {
-            String coords = modelDep.getGroupId() + ":" + modelDep.getArtifactId()
+            String version = modelDep.getVersion();
+            if (version == null && parentModel != null) {
+                version = findManagedVersion(parentModel, modelDep.getGroupId(), modelDep.getArtifactId());
+            }
+            version = resolveProperties(version != null ? version : "RELEASE", properties);
+
+            String groupId = resolveProperties(modelDep.getGroupId(), properties);
+            String artifactId = resolveProperties(modelDep.getArtifactId(), properties);
+
+            String coords = groupId + ":" + artifactId
                     + ":" + (modelDep.getType() != null ? modelDep.getType() : "jar")
                     + (modelDep.getClassifier() != null ? ":" + modelDep.getClassifier() : "")
-                    + ":" + (modelDep.getVersion() != null ? modelDep.getVersion() : "RELEASE");
+                    + ":" + version;
 
             Artifact artifact = new DefaultArtifact(coords);
             Dependency dep = new Dependency(artifact,
@@ -108,6 +158,60 @@ public class MavenBuildTool implements BuildTool {
 
         CollectResult collectResult = repoSystem.collectDependencies(session, collectRequest);
         return collectResult.getRoot();
+    }
+
+    private java.util.Properties buildProperties(Model model, Model parentModel) {
+        java.util.Properties props = new java.util.Properties();
+        if (parentModel != null && parentModel.getProperties() != null) {
+            props.putAll(parentModel.getProperties());
+            if (parentModel.getVersion() != null) {
+                props.putIfAbsent("project.version", parentModel.getVersion());
+                props.putIfAbsent("project.parent.version", parentModel.getVersion());
+            }
+            if (parentModel.getGroupId() != null) {
+                props.putIfAbsent("project.parent.groupId", parentModel.getGroupId());
+            }
+        }
+        if (model.getProperties() != null) {
+            props.putAll(model.getProperties());
+        }
+        if (model.getVersion() != null) {
+            props.put("project.version", model.getVersion());
+        } else if (parentModel != null && parentModel.getVersion() != null) {
+            props.putIfAbsent("project.version", parentModel.getVersion());
+        }
+        if (model.getGroupId() != null) {
+            props.put("project.groupId", model.getGroupId());
+        } else if (parentModel != null && parentModel.getGroupId() != null) {
+            props.putIfAbsent("project.groupId", parentModel.getGroupId());
+        }
+        return props;
+    }
+
+    String resolveProperties(String value, java.util.Properties properties) {
+        if (value == null || !value.contains("${")) return value;
+        String resolved = value;
+        for (int i = 0; i < 5; i++) {
+            int start = resolved.indexOf("${");
+            if (start < 0) break;
+            int end = resolved.indexOf("}", start);
+            if (end < 0) break;
+            String key = resolved.substring(start + 2, end);
+            String replacement = properties.getProperty(key);
+            if (replacement == null) break;
+            resolved = resolved.substring(0, start) + replacement + resolved.substring(end + 1);
+        }
+        return resolved;
+    }
+
+    private String findManagedVersion(Model parentModel, String groupId, String artifactId) {
+        if (parentModel.getDependencyManagement() == null) return null;
+        for (org.apache.maven.model.Dependency managed : parentModel.getDependencyManagement().getDependencies()) {
+            if (groupId.equals(managed.getGroupId()) && artifactId.equals(managed.getArtifactId())) {
+                return managed.getVersion();
+            }
+        }
+        return null;
     }
 
     private DagEntry buildDagEntry(DependencyNode node, Path localRepo, String pomPath,

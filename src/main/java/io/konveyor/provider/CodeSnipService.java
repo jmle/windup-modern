@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -21,9 +23,20 @@ public class CodeSnipService extends ProviderCodeLocationServiceGrpc.ProviderCod
     private static final Logger LOG = LoggerFactory.getLogger(CodeSnipService.class);
 
     private final int contextLines;
+    private volatile Charset charset = StandardCharsets.UTF_8;
 
     public CodeSnipService(int contextLines) {
         this.contextLines = contextLines;
+    }
+
+    public void setEncoding(String encoding) {
+        if (encoding == null || encoding.isEmpty()) return;
+        try {
+            this.charset = Charset.forName(encoding);
+            LOG.info("Using file encoding: {}", this.charset);
+        } catch (Exception e) {
+            LOG.warn("Unsupported encoding '{}', using UTF-8", encoding);
+        }
     }
 
     @Override
@@ -32,7 +45,7 @@ public class CodeSnipService extends ProviderCodeLocationServiceGrpc.ProviderCod
         Location loc = request.getCodeLocation();
 
         try {
-            String snippet = extractSnippet(fileUri, (int) loc.getStartPosition().getLine(), contextLines);
+            String snippet = extractSnippet(fileUri, (int) loc.getStartPosition().getLine(), contextLines, charset);
             responseObserver.onNext(GetCodeSnipResponse.newBuilder()
                     .setSnip(snippet)
                     .build());
@@ -45,9 +58,13 @@ public class CodeSnipService extends ProviderCodeLocationServiceGrpc.ProviderCod
         responseObserver.onCompleted();
     }
 
-    static String extractSnippet(String fileUri, int targetLine, int contextLines) throws IOException {
+    String extractSnippet(String fileUri, int targetLine, int contextLines) throws IOException {
+        return extractSnippet(fileUri, targetLine, contextLines, charset);
+    }
+
+    static String extractSnippet(String fileUri, int targetLine, int contextLines, Charset charset) throws IOException {
         Path path = Path.of(URI.create(fileUri));
-        List<String> lines = Files.readAllLines(path);
+        List<String> lines = Files.readAllLines(path, charset);
 
         int startLine = Math.max(0, targetLine - contextLines);
         int endLine = Math.min(lines.size(), targetLine + contextLines + 1);

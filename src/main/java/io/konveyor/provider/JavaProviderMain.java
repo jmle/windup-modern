@@ -38,6 +38,7 @@ public class JavaProviderMain {
 
         JavaProviderService providerService = new JavaProviderService(contextLines);
         CodeSnipService codeSnipService = new CodeSnipService(contextLines);
+        providerService.setCodeSnipService(codeSnipService);
         DependencyLocationService depLocationService = new DependencyLocationService();
 
         Server server = ServerBuilder.forPort(port)

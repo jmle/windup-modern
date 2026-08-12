@@ -4,6 +4,7 @@ import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.konveyor.provider.buildtool.BuildTool;
 import io.konveyor.provider.buildtool.BuildToolDetector;
+import io.konveyor.provider.buildtool.DependencyCache;
 import io.konveyor.provider.buildtool.DependencyLabeler;
 import io.konveyor.provider.buildtool.DependencyResolver;
 import io.konveyor.provider.grpc.*;
@@ -98,12 +99,23 @@ public class WorkspaceContext {
         LOG.info("Workspace {} indexed: {} symbols from application source", id, symbolIndex.size());
 
         if (!isArchive(root)) {
-            buildTool = BuildToolDetector.detect(root);
+            String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
+            Path mavenIndexPath = mavenIndexPathStr != null ? Path.of(mavenIndexPathStr) : null;
+            buildTool = BuildToolDetector.detect(root, mavenIndexPath);
             try {
-                resolvedDag = buildTool.getDependenciesDAG(root);
-                resolvedDeps = BuildTool.flattenDag(resolvedDag);
-                LOG.info("Resolved {} dependencies ({} top-level) via {} for workspace {}",
-                        resolvedDeps.size(), resolvedDag.size(), buildTool.getType(), id);
+                Path buildFile = detectBuildFile(root);
+                DependencyCache cache = buildFile != null ? new DependencyCache(buildFile) : null;
+                if (cache != null && cache.isValid()) {
+                    resolvedDag = cache.getCached();
+                    resolvedDeps = BuildTool.flattenDag(resolvedDag);
+                    LOG.info("Using cached dependencies ({} top-level) for workspace {}", resolvedDag.size(), id);
+                } else {
+                    resolvedDag = buildTool.getDependenciesDAG(root);
+                    resolvedDeps = BuildTool.flattenDag(resolvedDag);
+                    if (cache != null) cache.store(resolvedDag);
+                    LOG.info("Resolved {} dependencies ({} top-level) via {} for workspace {}",
+                            resolvedDeps.size(), resolvedDag.size(), buildTool.getType(), id);
+                }
             } catch (Exception e) {
                 LOG.warn("Dependency resolution failed, falling back to static parsing: {}", e.getMessage());
                 resolvedDag = List.of();
@@ -114,6 +126,16 @@ public class WorkspaceContext {
                 resolveDependencySources(root);
             }
         }
+    }
+
+    private static Path detectBuildFile(Path root) {
+        Path pom = root.resolve("pom.xml");
+        if (Files.exists(pom)) return pom;
+        Path gradle = root.resolve("build.gradle");
+        if (Files.exists(gradle)) return gradle;
+        Path gradleKts = root.resolve("build.gradle.kts");
+        if (Files.exists(gradleKts)) return gradleKts;
+        return null;
     }
 
     private static boolean isArchive(Path path) {

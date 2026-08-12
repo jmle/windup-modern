@@ -4,13 +4,15 @@
 
 **Benchmark:** tackle-testapp, cloud-readiness + quarkus targets, source-only mode, 12 cores / 31 GB RAM.
 
+**Engine concurrency model:** The kantra engine uses a **worker pool of 10 goroutines** (configurable via `--workers`) to evaluate rules in parallel. Tagging/info rules run sequentially first (they produce tags other rules depend on), then all remaining rules are fanned out to the worker pool. However, **AND/OR conditions within a single rule are evaluated sequentially** — each OR branch triggers a separate blocking gRPC Evaluate call, and the worker waits for each response before sending the next. This means the slow calls (1-5s) are caused by multi-condition rules where a single worker blocks on sequential OR branch evaluation, not by overall engine serialization.
+
 ---
 
 ## 1. Fix the 20 Slow Evaluate Calls -- IMPLEMENTED
 
 **Impact:** High (estimated ~30s). **Measured: ~6s savings on rule eval span (51s -> 45s), ~3s on wall time (64s -> 61s).**
 **Scope:** Java provider
-**Status:** Done. YAML reuse and pattern caching delivered measurable improvement. ZGC eliminates GC pause risk. The remaining slow calls (~20 at 1-5s) are engine-side: kantra processes multi-condition dependency OR rules sequentially, and the gaps occur between evaluate calls, not during them.
+**Status:** Done. YAML reuse and pattern caching delivered measurable improvement. ZGC eliminates GC pause risk. The remaining slow calls (~20 at 1-5s) are caused by multi-condition dependency OR rules: each OR branch is a separate blocking gRPC call within a single worker goroutine, and the 1-5s gaps occur between sequential OR branch evaluations within these rules.
 
 ### JVM GC Pauses -- IMPLEMENTED
 
@@ -24,7 +26,7 @@ Currently kantra launches the provider with a fixed command (`<binary> --port <p
 
 ### YAML Parsing Overhead -- IMPLEMENTED
 
-Replaced per-call `new Yaml()` with a single `Yaml` instance per `WorkspaceContext`. This is safe because kantra calls evaluate sequentially (no concurrent calls to the same workspace).
+Replaced per-call `new Yaml()` with a `ThreadLocal<Yaml>` instance. This is necessary because kantra's 10-worker pool can send concurrent evaluate calls to the same workspace from different goroutines.
 
 **Before:**
 ```java
@@ -35,10 +37,10 @@ private ProviderEvaluateResponse evaluateReferenced(String conditionInfo) {
 
 **After:**
 ```java
-private final Yaml yaml = new Yaml();
+private static final ThreadLocal<Yaml> YAML = ThreadLocal.withInitial(Yaml::new);
 // ...
 private ProviderEvaluateResponse evaluateReferenced(String conditionInfo) {
-    Map<String, Object> cond = yaml.load(conditionInfo);
+    Map<String, Object> cond = YAML.get().load(conditionInfo);
 ```
 
 ### Regex Compilation -- IMPLEMENTED
@@ -64,7 +66,7 @@ public static Pattern globToRegex(String glob) {
 
 ### Post-Implementation Analysis
 
-The slow calls (1-5s) persist across runs and affect the same rules: `observability-0100`, `mvc-01220`, `embedded-cache-libraries-15000`, `database-03000`. These are all multi-condition dependency OR rules (e.g., 4 `java.dependency` branches). The engine evaluates each OR branch as a separate gRPC call and waits for each response before sending the next. The stalls are in the engine's sequential OR processing, not in the provider's response time.
+The slow calls (1-5s) persist across runs and affect the same rules: `observability-0100`, `mvc-01220`, `embedded-cache-libraries-15000`, `database-03000`. These are all multi-condition dependency OR rules (e.g., 4 `java.dependency` branches). Within a single rule, the engine evaluates OR conditions sequentially (one blocking gRPC call per branch), with 1-5s gaps between branches. Note: rules themselves run in parallel across 10 workers — the sequential bottleneck is within individual multi-condition rules, not across the ruleset.
 
 ---
 
@@ -82,27 +84,35 @@ Added `EnumMap<LocationType, HashMap<String, List<IndexedSymbol>>>` keyed by qua
 
 ### Evaluate Result Caching -- TRIED
 
-Added `ConcurrentHashMap<String, ProviderEvaluateResponse>` cache keyed by `cap + conditionInfo`. Required `ThreadLocal<Yaml>` for thread safety (kantra calls evaluate from multiple concurrent workers).
+Added `ConcurrentHashMap<String, ProviderEvaluateResponse>` cache keyed by `cap + conditionInfo`.
 
-**Result:** Very few cache hits in practice — each rule sends unique conditionInfo strings. The ConcurrentHashMap overhead added no measurable benefit. Reverted. Note: the `ThreadLocal<Yaml>` fix was kept (part of section 1) since it prevents thread-safety crashes.
+**Result:** Very few cache hits in practice — each rule sends unique conditionInfo strings. The ConcurrentHashMap overhead added no measurable benefit. Reverted.
 
 ### Why provider-side query optimization doesn't help
 
-The provider's query response time is already well under the engine's inter-call processing time. With 592 evaluate calls and 96% completing in <10ms, even a 10x speedup on the provider side saves at most ~3s. The dominant cost (45-50s of the eval span) is the engine sequentially processing multi-condition OR rules, where each OR branch triggers a separate evaluate call with processing gaps of 1-5s between them. Only engine-level parallelism (section 3) can address this.
+The provider's query response time is already well under the engine's inter-call processing time. With 592 evaluate calls and 96% completing in <10ms, even a 10x speedup on the provider side saves at most ~3s. The dominant cost (45-50s of the eval span) comes from multi-condition OR rules where each OR branch triggers a separate blocking evaluate call with processing gaps of 1-5s between them. The engine already parallelizes rules across 10 workers, but within a single rule, OR conditions are evaluated sequentially. Only intra-rule condition parallelism (section 3) can address this.
 
 ---
 
 ## 3. Engine-Level Changes
 
-**Impact:** Highest theoretical impact
+**Impact:** Moderate (rule-level parallelism already exists)
 **Scope:** Kantra engine (Go codebase, `analyzer-lsp`)
-**Status:** Not yet implemented. These require changes outside the Java provider but would benefit all providers.
+**Status:** Rule-level parallelism already implemented (10-worker pool). Remaining opportunities target intra-rule condition parallelism.
 
-### Parallel Rule Evaluation
+### Parallel Rule Evaluation — ALREADY IMPLEMENTED
 
-The kantra engine processes 1,075 rules sequentially. Most rules are independent (no `as`/`from` chaining). Evaluating them concurrently (e.g., 8 goroutines with a semaphore) would reduce the 51s evaluation phase to ~6-8s.
+The kantra engine already uses a **worker pool of 10 goroutines** (configurable via `--workers`) to evaluate rules in parallel. Tagging/info rules run sequentially first (they produce tags other rules depend on), then all remaining rules are fanned out to the pool. The gRPC-Java server handles concurrent calls via its thread pool.
 
-This is the single biggest possible improvement. The provider's gRPC server already supports concurrent calls (gRPC-Java uses a thread pool). The engine just needs to dispatch rules in parallel and collect results.
+This was previously documented as "not yet implemented" based on incorrect analysis. In reality, the engine has had this since at least the current version.
+
+### Parallel OR Condition Evaluation (within a single rule)
+
+The remaining bottleneck: within a single rule, AND/OR conditions are evaluated **sequentially**. The engine code (`engine/conditions.go`) has an explicit comment: `"For now, lets not fan out the running of conditions."` For OR conditions (which don't chain — each branch is independent), parallel evaluation would eliminate the 1-5s stalls on multi-condition dependency rules.
+
+This is the **single biggest remaining improvement**. The ~20 slow rules (`observability-0100`, `embedded-cache-libraries-15000`, etc.) each have 4+ OR branches evaluated serially. Parallelizing independent OR branches could reduce these from 4-20s per rule to the cost of one branch.
+
+AND conditions are harder to parallelize because they support `as`/`from` chaining where one condition's output feeds the next.
 
 ### Batch Evaluate gRPC API
 
@@ -144,18 +154,20 @@ Kantra currently launches providers with a fixed command: `<binary> --port <port
 | Optimization | Estimated | Measured | Scope | Status |
 |---|---:|---:|---|---|
 | ZGC | ~10-15s | prevents GC stalls | JVM flag | Done |
-| Reuse Yaml parser | ~2-5s | } ~6s combined | Provider | Done |
+| ThreadLocal Yaml parser | ~2-5s | } ~6s combined | Provider | Done |
 | Cache compiled patterns | ~2-5s | } | Provider | Done |
 | Hash-based exact lookup | ~5-10s | ~0s (reverted) | Provider | Tried |
 | Evaluate result caching | ~2-5s | ~0s (reverted) | Provider | Tried |
-| Parallel rule evaluation | ~40-45s | -- | Engine | Todo |
+| Parallel rule evaluation | ~40-45s | already exists | Engine | Exists |
+| Parallel OR conditions | ~20-30s | -- | Engine | Todo |
 | Batch evaluate API | ~5-10s | -- | Both | Todo |
 
 **Implemented (section 1):** ~3s wall time savings (64s -> 61s), ~6s rule eval savings (51s -> 45s).
 **Tried and reverted (section 2):** No measurable improvement. Provider query time is not the bottleneck.
-**With engine parallelism (section 3):** ~40-45s estimated savings, bringing total wall time to ~15-20s (faster than Go's 34s).
+**Already exists (section 3):** Rule-level parallelism (10-worker pool) is already in the engine.
+**Remaining opportunity (section 3):** Parallel OR condition evaluation within rules — the ~20 slow multi-condition rules could see significant speedups.
 
-The measured improvement from section 1 is lower than estimated because the 1-5s slow calls turned out to be engine-side (sequential OR branch processing), not provider-side. The provider responds in <10ms for 96% of calls; the stalls happen while the engine processes results between calls.
+The measured improvement from section 1 is lower than estimated because the 1-5s slow calls are caused by sequential OR branch processing within individual rules, not by overall engine serialization. The engine already parallelizes across rules; the bottleneck is within single multi-condition rules where OR branches are evaluated one at a time.
 
 ---
 
@@ -185,4 +197,4 @@ Latency distribution measured from kantra analysis logs (`Made call to Evaluate`
 | Total rule evaluation | 45s | 45s |
 | Wall clock | 62s | 61s |
 
-Note: Evaluate call count varies between runs due to non-deterministic rule ordering in the kantra engine. The rule eval span (45s) is consistent.
+Note: Evaluate call count varies between runs due to non-deterministic rule ordering across the 10 parallel workers. The rule eval span (45s) is consistent.

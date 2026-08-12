@@ -16,6 +16,10 @@ public class BuildToolDetector {
     private static final Logger LOG = LoggerFactory.getLogger(BuildToolDetector.class);
 
     public static BuildTool detect(Path projectDir) {
+        return detect(projectDir, null);
+    }
+
+    public static BuildTool detect(Path projectDir, Path mavenIndexPath) {
         if (Files.exists(projectDir.resolve("build.gradle"))
                 || Files.exists(projectDir.resolve("build.gradle.kts"))) {
             LOG.info("Detected Gradle project at {}", projectDir);
@@ -30,7 +34,7 @@ public class BuildToolDetector {
         String name = projectDir.getFileName().toString().toLowerCase();
         if (name.endsWith(".jar") || name.endsWith(".war") || name.endsWith(".ear")) {
             LOG.info("Detected binary artifact at {}", projectDir);
-            return new BinaryBuildTool();
+            return new BinaryBuildTool(mavenIndexPath);
         }
 
         LOG.info("Defaulting to Maven build tool for {}", projectDir);

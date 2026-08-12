@@ -81,4 +81,175 @@ class MavenBuildToolTest {
     void flattenDagEmptyReturnsEmpty() {
         assertThat(BuildTool.flattenDag(List.of())).isEmpty();
     }
+
+    @Test
+    void multiModuleCollectsChildDependencies() throws Exception {
+        Path parentDir = tempDir.resolve("multi-module");
+        Files.createDirectories(parentDir);
+        Files.writeString(parentDir.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId>
+                  <artifactId>parent</artifactId>
+                  <version>1.0.0</version>
+                  <packaging>pom</packaging>
+                  <modules>
+                    <module>child-a</module>
+                    <module>child-b</module>
+                  </modules>
+                </project>
+                """);
+
+        Path childA = parentDir.resolve("child-a");
+        Files.createDirectories(childA);
+        Files.writeString(childA.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <parent>
+                    <groupId>com.example</groupId>
+                    <artifactId>parent</artifactId>
+                    <version>1.0.0</version>
+                  </parent>
+                  <artifactId>child-a</artifactId>
+                  <dependencies>
+                    <dependency>
+                      <groupId>junit</groupId>
+                      <artifactId>junit</artifactId>
+                      <version>4.13.2</version>
+                    </dependency>
+                  </dependencies>
+                </project>
+                """);
+
+        Path childB = parentDir.resolve("child-b");
+        Files.createDirectories(childB);
+        Files.writeString(childB.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <parent>
+                    <groupId>com.example</groupId>
+                    <artifactId>parent</artifactId>
+                    <version>1.0.0</version>
+                  </parent>
+                  <artifactId>child-b</artifactId>
+                  <dependencies>
+                    <dependency>
+                      <groupId>org.slf4j</groupId>
+                      <artifactId>slf4j-api</artifactId>
+                      <version>2.0.9</version>
+                    </dependency>
+                  </dependencies>
+                </project>
+                """);
+
+        MavenBuildTool tool = new MavenBuildTool();
+        List<BuildTool.DagEntry> dag = tool.getDependenciesDAG(parentDir);
+
+        assertThat(dag).isNotEmpty();
+        List<String> artifactIds = dag.stream()
+                .map(e -> e.dep().artifactId())
+                .toList();
+        assertThat(artifactIds).contains("junit", "slf4j-api");
+    }
+
+    @Test
+    void multiModuleSkipsMissingChildPom() throws Exception {
+        Path parentDir = tempDir.resolve("multi-missing");
+        Files.createDirectories(parentDir);
+        Files.writeString(parentDir.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId>
+                  <artifactId>parent</artifactId>
+                  <version>1.0.0</version>
+                  <packaging>pom</packaging>
+                  <modules>
+                    <module>exists</module>
+                    <module>missing</module>
+                  </modules>
+                </project>
+                """);
+
+        Path exists = parentDir.resolve("exists");
+        Files.createDirectories(exists);
+        Files.writeString(exists.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <artifactId>exists</artifactId>
+                  <dependencies>
+                    <dependency>
+                      <groupId>junit</groupId>
+                      <artifactId>junit</artifactId>
+                      <version>4.13.2</version>
+                    </dependency>
+                  </dependencies>
+                </project>
+                """);
+
+        MavenBuildTool tool = new MavenBuildTool();
+        List<BuildTool.DagEntry> dag = tool.getDependenciesDAG(parentDir);
+
+        assertThat(dag).isNotEmpty();
+        assertThat(dag.stream().map(e -> e.dep().artifactId()).toList()).contains("junit");
+    }
+
+    @Test
+    void multiModuleResolvesProjectVersion() throws Exception {
+        Path parentDir = tempDir.resolve("multi-version");
+        Files.createDirectories(parentDir);
+        Files.writeString(parentDir.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId>
+                  <artifactId>parent</artifactId>
+                  <version>2.5.0</version>
+                  <packaging>pom</packaging>
+                  <modules>
+                    <module>child</module>
+                  </modules>
+                </project>
+                """);
+
+        Path child = parentDir.resolve("child");
+        Files.createDirectories(child);
+        Files.writeString(child.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <parent>
+                    <groupId>com.example</groupId>
+                    <artifactId>parent</artifactId>
+                    <version>2.5.0</version>
+                  </parent>
+                  <artifactId>child</artifactId>
+                  <dependencies>
+                    <dependency>
+                      <groupId>junit</groupId>
+                      <artifactId>junit</artifactId>
+                      <version>${project.version}</version>
+                    </dependency>
+                  </dependencies>
+                </project>
+                """);
+
+        MavenBuildTool tool = new MavenBuildTool();
+        List<BuildTool.DagEntry> dag = tool.getDependenciesDAG(parentDir);
+
+        assertThat(dag).isNotEmpty();
+        assertThat(dag.get(0).dep().version()).isEqualTo("2.5.0");
+    }
+
+    @Test
+    void propertyResolutionHandlesNestedAndMissing() {
+        MavenBuildTool tool = new MavenBuildTool();
+        java.util.Properties props = new java.util.Properties();
+        props.setProperty("my.version", "3.0");
+        props.setProperty("project.groupId", "com.test");
+
+        assertThat(tool.resolveProperties("${my.version}", props)).isEqualTo("3.0");
+        assertThat(tool.resolveProperties("${project.groupId}:${my.version}", props))
+                .isEqualTo("com.test:3.0");
+        assertThat(tool.resolveProperties("${unknown}", props)).isEqualTo("${unknown}");
+        assertThat(tool.resolveProperties(null, props)).isNull();
+        assertThat(tool.resolveProperties("plain", props)).isEqualTo("plain");
+    }
 }
