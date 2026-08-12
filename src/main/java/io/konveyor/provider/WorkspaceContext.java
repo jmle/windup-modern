@@ -35,7 +35,7 @@ public class WorkspaceContext {
     private final String analysisMode;
     private final Config config;
     private final int contextLines;
-    private final Yaml yaml = new Yaml();
+    private static final ThreadLocal<Yaml> YAML = ThreadLocal.withInitial(Yaml::new);
     private final SymbolIndex symbolIndex = new SymbolIndex();
     private final List<String> includedPaths;
     private final DependencyLabeler labeler;
@@ -186,7 +186,7 @@ public class WorkspaceContext {
 
     @SuppressWarnings("unchecked")
     private ProviderEvaluateResponse evaluateReferenced(String conditionInfo) {
-        Map<String, Object> cond = yaml.load(conditionInfo);
+        Map<String, Object> cond = YAML.get().load(conditionInfo);
         Map<String, Object> referenced = (Map<String, Object>) cond.get("referenced");
 
         if (referenced == null) {
@@ -342,7 +342,7 @@ public class WorkspaceContext {
 
     @SuppressWarnings("unchecked")
     private ProviderEvaluateResponse evaluateDependency(String conditionInfo) {
-        Map<String, Object> cond = yaml.load(conditionInfo);
+        Map<String, Object> cond = YAML.get().load(conditionInfo);
         Map<String, Object> depCond = (Map<String, Object>) cond.get("dependency");
 
         if (depCond == null || resolvedDeps == null || resolvedDeps.isEmpty()) {

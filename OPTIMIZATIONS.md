@@ -68,48 +68,27 @@ The slow calls (1-5s) persist across runs and affect the same rules: `observabil
 
 ---
 
-## 2. Provider-Side Query Optimization
+## 2. Provider-Side Query Optimization -- TRIED, NO IMPROVEMENT
 
-**Impact:** Medium (~5-10s savings)
+**Impact:** Negligible. **Measured: no improvement (62s with vs 62s without).**
 **Scope:** Java provider
-**Status:** Not yet implemented
+**Status:** Tried and reverted. The provider already responds in <10ms for 96% of calls; the bottleneck is engine-side processing time between calls. Speeding up the provider's query path has no measurable effect on wall time or eval span.
 
-### Hash-Based Lookup for Exact Patterns
+### Hash-Based Lookup for Exact Patterns -- TRIED
 
-Most rule patterns have no wildcards (e.g., `javax.ejb.SessionBean`). Currently, `SymbolIndex.query()` does a linear scan through all symbols of a location type and applies regex matching for every symbol.
+Added `EnumMap<LocationType, HashMap<String, List<IndexedSymbol>>>` keyed by qualified name, populated during `mergeSymbols()`. Exact-match queries (no wildcards) bypass the regex scan entirely.
 
-**Fix:** When the glob has no `*` or `?`, use a `HashMap<String, List<IndexedSymbol>>` keyed by qualified name instead of regex scanning. This turns O(n) per query into O(1).
+**Result:** The indexing overhead (~5s to populate the hash map for ~30k symbols including dependencies) offset the per-query savings. Net effect was neutral to slightly negative. Reverted.
 
-```java
-private final Map<String, Map<String, List<IndexedSymbol>>> byLocationAndQN = new EnumMap<>(LocationType.class);
+### Evaluate Result Caching -- TRIED
 
-public List<IndexedSymbol> query(String pattern, LocationType location) {
-    if (!containsWildcard(pattern)) {
-        return byLocationAndQN
-            .getOrDefault(location, Map.of())
-            .getOrDefault(pattern, List.of());
-    }
-    // Fall back to regex scan for wildcard patterns
-    ...
-}
-```
+Added `ConcurrentHashMap<String, ProviderEvaluateResponse>` cache keyed by `cap + conditionInfo`. Required `ThreadLocal<Yaml>` for thread safety (kantra calls evaluate from multiple concurrent workers).
 
-### Pre-Index by Qualified Name Prefix
+**Result:** Very few cache hits in practice — each rule sends unique conditionInfo strings. The ConcurrentHashMap overhead added no measurable benefit. Reverted. Note: the `ThreadLocal<Yaml>` fix was kept (part of section 1) since it prevents thread-safety crashes.
 
-For wildcard patterns like `org.springframework.*`, a prefix-based index would avoid scanning all symbols. Build a `TreeMap<String, List<IndexedSymbol>>` at init time, then use `subMap()` to narrow the search range.
+### Why provider-side query optimization doesn't help
 
-### Evaluate Result Caching
-
-Cache evaluate results by `conditionInfo` string. Many rules query identical or overlapping patterns; a cache avoids redundant index scans.
-
-```java
-private final Map<String, ProviderEvaluateResponse> evaluateCache = new HashMap<>();
-
-public ProviderEvaluateResponse evaluate(String cap, String conditionInfo) {
-    return evaluateCache.computeIfAbsent(cap + ":" + conditionInfo,
-        k -> doEvaluate(cap, conditionInfo));
-}
-```
+The provider's query response time is already well under the engine's inter-call processing time. With 592 evaluate calls and 96% completing in <10ms, even a 10x speedup on the provider side saves at most ~3s. The dominant cost (45-50s of the eval span) is the engine sequentially processing multi-condition OR rules, where each OR branch triggers a separate evaluate call with processing gaps of 1-5s between them. Only engine-level parallelism (section 3) can address this.
 
 ---
 
@@ -167,14 +146,14 @@ Kantra currently launches providers with a fixed command: `<binary> --port <port
 | ZGC | ~10-15s | prevents GC stalls | JVM flag | Done |
 | Reuse Yaml parser | ~2-5s | } ~6s combined | Provider | Done |
 | Cache compiled patterns | ~2-5s | } | Provider | Done |
-| Hash-based exact lookup | ~5-10s | -- | Provider | Todo |
-| Evaluate result caching | ~2-5s | -- | Provider | Todo |
+| Hash-based exact lookup | ~5-10s | ~0s (reverted) | Provider | Tried |
+| Evaluate result caching | ~2-5s | ~0s (reverted) | Provider | Tried |
 | Parallel rule evaluation | ~40-45s | -- | Engine | Todo |
 | Batch evaluate API | ~5-10s | -- | Both | Todo |
 
 **Implemented (section 1):** ~3s wall time savings (64s -> 61s), ~6s rule eval savings (51s -> 45s).
-**Remaining provider-side (section 2):** ~5-10s additional savings estimated.
-**With engine parallelism (section 3):** ~40-45s savings, bringing total wall time to ~15-20s (faster than Go's 34s).
+**Tried and reverted (section 2):** No measurable improvement. Provider query time is not the bottleneck.
+**With engine parallelism (section 3):** ~40-45s estimated savings, bringing total wall time to ~15-20s (faster than Go's 34s).
 
 The measured improvement from section 1 is lower than estimated because the 1-5s slow calls turned out to be engine-side (sequential OR branch processing), not provider-side. The provider responds in <10ms for 96% of calls; the stalls happen while the engine processes results between calls.
 

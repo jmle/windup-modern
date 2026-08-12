@@ -218,6 +218,7 @@ public class SymbolIndex {
         // For type-reference locations, strip generic type parameters (erasure matching)
         boolean useErasure = isTypeReferenceLocation(searchLocation);
         String effectivePattern = useErasure ? stripTypeParameters(pattern) : pattern;
+
         List<IndexedSymbol> candidates = byLocation.getOrDefault(searchLocation, List.of());
 
         Pattern regex = globToRegex(effectivePattern);
