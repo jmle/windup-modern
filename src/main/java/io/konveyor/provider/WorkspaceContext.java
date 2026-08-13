@@ -409,10 +409,9 @@ public class WorkspaceContext {
 
             int lineNumber = 0;
             if (!buildFileLines.isEmpty()) {
-                int line0 = "pom.xml".equals(buildFile)
+                lineNumber = "pom.xml".equals(buildFile)
                         ? DependencyLocationService.findInPom(buildFileLines, dep.groupId(), dep.artifactId())
                         : DependencyLocationService.findInGradle(buildFileLines, dep.groupId(), dep.artifactId());
-                lineNumber = line0 + 1;
             }
 
             Struct.Builder vars = Struct.newBuilder()

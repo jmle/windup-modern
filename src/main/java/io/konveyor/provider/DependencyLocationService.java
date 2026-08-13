@@ -34,10 +34,8 @@ public class DependencyLocationService
             return;
         }
 
-        String pomPath = extractExtra(dep.getExtras(), "pomPath");
-
         try {
-            Path filePath = resolveDepFilePath(pomPath, depFile);
+            Path filePath = resolveDepFilePath(depFile);
             int line = findDependencyLine(filePath, groupId, artifactId);
             Location location = Location.newBuilder()
                     .setStartPosition(Position.newBuilder().setLine(line).setCharacter(0))
@@ -67,23 +65,18 @@ public class DependencyLocationService
     }
 
     static int findInPom(List<String> lines, String groupId, String artifactId) {
+        boolean inDependencies = false;
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i).trim();
+            if (line.contains("<dependencies")) inDependencies = true;
+            if (!inDependencies) continue;
+
             if (line.contains("<groupId>") && line.contains(groupId)) {
-                if (i + 1 < lines.size() && lines.get(i + 1).trim().contains(artifactId)) {
-                    return i;
-                }
-                if (i > 0 && lines.get(i - 1).trim().contains(artifactId)) {
-                    return i - 1;
-                }
-                return i;
-            }
-            if (line.contains("<artifactId>") && line.contains(artifactId)) {
-                if (i > 0 && lines.get(i - 1).trim().contains(groupId)) {
-                    return i - 1;
-                }
-                if (i + 1 < lines.size() && lines.get(i + 1).trim().contains(groupId)) {
-                    return i;
+                for (int j = Math.max(0, i - 3); j <= Math.min(lines.size() - 1, i + 3); j++) {
+                    if (j != i && lines.get(j).trim().contains("<artifactId>")
+                            && lines.get(j).trim().contains(artifactId)) {
+                        return Math.min(i, j) + 1;
+                    }
                 }
             }
         }
@@ -94,16 +87,13 @@ public class DependencyLocationService
         String pattern = groupId + ":" + artifactId;
         for (int i = 0; i < lines.size(); i++) {
             if (lines.get(i).contains(pattern)) {
-                return i;
+                return i + 1;
             }
         }
         return 0;
     }
 
-    static Path resolveDepFilePath(String pomPath, String depFile) {
-        if (pomPath != null && !pomPath.isEmpty()) {
-            return Path.of(pomPath);
-        }
+    static Path resolveDepFilePath(String depFile) {
         if (depFile.startsWith("file://")) {
             return Path.of(URI.create(depFile));
         }
