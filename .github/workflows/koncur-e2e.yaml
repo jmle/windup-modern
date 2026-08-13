@@ -71,6 +71,17 @@ jobs:
           SKIP_MAVEN: "true"
         run: koncur run tests -t kantra -o yaml --output-file results.yaml
 
+      - name: Dump provider container logs
+        if: always()
+        run: |
+          echo "=== Provider containers ==="
+          podman ps -a --filter "name=provider-" --format "{{.Names}} {{.Status}}" || true
+          for c in $(podman ps -a --filter "name=provider-" --format "{{.Names}}" 2>/dev/null); do
+            echo ""
+            echo "=== Logs for $c ==="
+            podman logs "$c" 2>&1 | tail -50
+          done
+
       - name: Upload test output on failure
         if: failure()
         uses: actions/upload-artifact@v4
