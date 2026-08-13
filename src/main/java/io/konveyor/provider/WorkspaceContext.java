@@ -274,6 +274,11 @@ public class WorkspaceContext {
                     .toList();
         }
 
+        // Exclude matches from dependency source files — only application source should produce incidents
+        matches = matches.stream()
+                .filter(s -> !symbolIndex.isDependencyFile(s.fileUri()))
+                .toList();
+
         if (matches.isEmpty()) {
             return ProviderEvaluateResponse.newBuilder().setMatched(false).build();
         }
@@ -383,7 +388,15 @@ public class WorkspaceContext {
 
         String buildFile = buildTool.getType() == BuildTool.Type.GRADLE
                 ? "build.gradle" : "pom.xml";
-        String buildFileUri = Path.of(location, buildFile).toUri().toString();
+        Path buildFilePath = Path.of(location, buildFile);
+        String buildFileUri = buildFilePath.toUri().toString();
+
+        List<String> buildFileLines;
+        try {
+            buildFileLines = Files.readAllLines(buildFilePath);
+        } catch (IOException e) {
+            buildFileLines = List.of();
+        }
 
         ProviderEvaluateResponse.Builder response = ProviderEvaluateResponse.newBuilder();
         List<IncidentContext> incidents = new ArrayList<>();
@@ -391,6 +404,14 @@ public class WorkspaceContext {
         for (BuildTool.ResolvedDependency dep : resolvedDeps) {
             if (!matchesName(dep, nameExact, namePattern)) continue;
             if (!matchesVersionBounds(dep.version(), lowerbound, upperbound)) continue;
+
+            int lineNumber = 0;
+            if (!buildFileLines.isEmpty()) {
+                int line0 = "pom.xml".equals(buildFile)
+                        ? DependencyLocationService.findInPom(buildFileLines, dep.groupId(), dep.artifactId())
+                        : DependencyLocationService.findInGradle(buildFileLines, dep.groupId(), dep.artifactId());
+                lineNumber = line0 + 1;
+            }
 
             Struct.Builder vars = Struct.newBuilder()
                     .putFields("name", Value.newBuilder().setStringValue(dep.name()).build())
@@ -401,7 +422,7 @@ public class WorkspaceContext {
 
             IncidentContext.Builder incident = IncidentContext.newBuilder()
                     .setFileURI(buildFileUri)
-                    .setLineNumber(0)
+                    .setLineNumber(lineNumber)
                     .setVariables(vars);
 
             incidents.add(incident.build());

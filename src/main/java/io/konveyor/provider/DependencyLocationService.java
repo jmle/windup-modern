@@ -62,7 +62,7 @@ public class DependencyLocationService
         return 0;
     }
 
-    private static int findInPom(List<String> lines, String groupId, String artifactId) {
+    static int findInPom(List<String> lines, String groupId, String artifactId) {
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i).trim();
             if (line.contains("<groupId>") && line.contains(groupId)) {
@@ -86,7 +86,7 @@ public class DependencyLocationService
         return 0;
     }
 
-    private static int findInGradle(List<String> lines, String groupId, String artifactId) {
+    static int findInGradle(List<String> lines, String groupId, String artifactId) {
         String pattern = groupId + ":" + artifactId;
         for (int i = 0; i < lines.size(); i++) {
             if (lines.get(i).contains(pattern)) {
