@@ -44,4 +44,5 @@ USER 1001
 ENV HOME=/addon
 EXPOSE 14651
 
-ENTRYPOINT ["java-external-provider", "--port", "14651"]
+ENTRYPOINT ["java-external-provider"]
+CMD ["--port", "14651"]

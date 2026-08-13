@@ -21,13 +21,14 @@ public class JavaProviderMain {
         int contextLines = 10;
 
         for (int i = 0; i < args.length; i++) {
-            switch (args[i]) {
-                case "--port" -> {
-                    if (i + 1 < args.length) port = Integer.parseInt(args[++i]);
-                }
-                case "--contxtLines" -> {
-                    if (i + 1 < args.length) contextLines = Integer.parseInt(args[++i]);
-                }
+            if (args[i].startsWith("--port=")) {
+                port = Integer.parseInt(args[i].substring("--port=".length()));
+            } else if ("--port".equals(args[i]) && i + 1 < args.length) {
+                port = Integer.parseInt(args[++i]);
+            } else if (args[i].startsWith("--contxtLines=")) {
+                contextLines = Integer.parseInt(args[i].substring("--contxtLines=".length()));
+            } else if ("--contxtLines".equals(args[i]) && i + 1 < args.length) {
+                contextLines = Integer.parseInt(args[++i]);
             }
         }
 
