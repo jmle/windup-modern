@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -33,8 +34,11 @@ public class DependencyLocationService
             return;
         }
 
+        String pomPath = extractExtra(dep.getExtras(), "pomPath");
+
         try {
-            int line = findDependencyLine(Path.of(depFile), groupId, artifactId);
+            Path filePath = resolveDepFilePath(pomPath, depFile);
+            int line = findDependencyLine(filePath, groupId, artifactId);
             Location location = Location.newBuilder()
                     .setStartPosition(Position.newBuilder().setLine(line).setCharacter(0))
                     .setEndPosition(Position.newBuilder().setLine(line).setCharacter(0))
@@ -94,6 +98,16 @@ public class DependencyLocationService
             }
         }
         return 0;
+    }
+
+    static Path resolveDepFilePath(String pomPath, String depFile) {
+        if (pomPath != null && !pomPath.isEmpty()) {
+            return Path.of(pomPath);
+        }
+        if (depFile.startsWith("file://")) {
+            return Path.of(URI.create(depFile));
+        }
+        return Path.of(depFile);
     }
 
     private static String extractExtra(Struct extras, String key) {

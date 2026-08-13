@@ -168,7 +168,9 @@ public class WorkspaceContext {
             resolvedDeps = BuildTool.flattenDag(resolvedDag);
         }
 
-        Path workDir = projectDir.resolve(".java-provider-work");
+        // Place work dir outside the source tree so the engine's file-discovery rules
+        // don't pick up decompiled dependency sources as application files
+        Path workDir = Path.of(System.getProperty("user.home"), ".java-provider-work", String.valueOf(id));
         try {
             DependencyResolver.ResolveResult result = resolver.resolve(resolvedDeps, workDir);
             if (!result.sourceDirs().isEmpty()) {
