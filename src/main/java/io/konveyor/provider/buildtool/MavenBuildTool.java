@@ -137,10 +137,13 @@ public class MavenBuildTool implements BuildTool {
 
         for (org.apache.maven.model.Dependency modelDep : model.getDependencies()) {
             String version = modelDep.getVersion();
+            if (version == null) {
+                version = findManagedVersion(model, modelDep.getGroupId(), modelDep.getArtifactId());
+            }
             if (version == null && parentModel != null) {
                 version = findManagedVersion(parentModel, modelDep.getGroupId(), modelDep.getArtifactId());
             }
-            version = resolveProperties(version != null ? version : "RELEASE", properties);
+            version = resolveProperties(version != null ? version : "[0,)", properties);
 
             String groupId = resolveProperties(modelDep.getGroupId(), properties);
             String artifactId = resolveProperties(modelDep.getArtifactId(), properties);

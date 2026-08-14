@@ -86,6 +86,12 @@ public class SymbolCollector extends ASTVisitor {
     // ------------------------------------------------------------------
 
     @Override
+    public boolean visit(PackageDeclaration node) {
+        addSymbol(packageName, packageName, SymbolKind.MODULE, LocationType.PACKAGE, node.getName());
+        return false;
+    }
+
+    @Override
     public boolean visit(ImportDeclaration node) {
         String fqn = node.getName().getFullyQualifiedName();
         if (node.isOnDemand()) {
@@ -93,7 +99,6 @@ public class SymbolCollector extends ASTVisitor {
         } else {
             addSymbol(fqn, fqn, SymbolKind.MODULE, LocationType.IMPORT, node);
         }
-        // PACKAGE symbols are derived from IMPORT symbols at query time in SymbolIndex
         return false;
     }
 

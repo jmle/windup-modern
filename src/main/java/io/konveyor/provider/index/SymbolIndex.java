@@ -261,17 +261,16 @@ public class SymbolIndex {
     }
 
     private List<IndexedSymbol> queryPackage(String pattern) {
-        List<IndexedSymbol> imports = byLocation.getOrDefault(LocationType.IMPORT, List.of());
-        if (imports.isEmpty()) {
-            return List.of();
-        }
-
-        // PACKAGE pattern matches against the package portion of each import's FQN.
-        // For import "javax.ejb.SessionBean", the package portion is "javax.ejb".
-        // For star import "org.springframework.stereotype.*", the package is "org.springframework.stereotype".
         Pattern regex = globToRegex(pattern);
         List<IndexedSymbol> matches = new ArrayList<>();
-        for (IndexedSymbol imp : imports) {
+
+        for (IndexedSymbol pkg : byLocation.getOrDefault(LocationType.PACKAGE, List.of())) {
+            if (regex.matcher(pkg.qualifiedName()).matches()) {
+                matches.add(pkg);
+            }
+        }
+
+        for (IndexedSymbol imp : byLocation.getOrDefault(LocationType.IMPORT, List.of())) {
             String fqn = imp.qualifiedName();
             String pkg;
             if (fqn.endsWith(".*")) {
@@ -440,6 +439,7 @@ public class SymbolIndex {
     }
 
     private static Pattern compileGlob(String glob) {
+        Set<Integer> alternationParens = findAlternationParens(glob);
         StringBuilder regex = new StringBuilder("^");
         for (int i = 0; i < glob.length(); i++) {
             char c = glob.charAt(i);
@@ -447,8 +447,9 @@ public class SymbolIndex {
                 case '*' -> regex.append(".*");
                 case '?' -> regex.append(".");
                 case '.' -> regex.append("\\.");
-                case '(' -> regex.append("\\(");
-                case ')' -> regex.append("\\)");
+                case '(' -> regex.append(alternationParens.contains(i) ? "(" : "\\(");
+                case ')' -> regex.append(alternationParens.contains(i) ? ")" : "\\)");
+                case '|' -> regex.append(alternationParens.contains(i) ? "|" : "\\|");
                 case '<' -> regex.append("\\<");
                 case '>' -> regex.append("\\>");
                 case '[' -> regex.append("\\[");
@@ -458,13 +459,41 @@ public class SymbolIndex {
                 case '\\' -> regex.append("\\\\");
                 case '^' -> regex.append("\\^");
                 case '$' -> regex.append("\\$");
-                case '|' -> regex.append("\\|");
                 case '+' -> regex.append("\\+");
                 default -> regex.append(c);
             }
         }
         regex.append("$");
         return Pattern.compile(regex.toString());
+    }
+
+    private static Set<Integer> findAlternationParens(String glob) {
+        Set<Integer> positions = new HashSet<>();
+        int depth = 0;
+        int openPos = -1;
+        boolean hasPipe = false;
+        for (int i = 0; i < glob.length(); i++) {
+            char c = glob.charAt(i);
+            if (c == '(') {
+                if (depth == 0) {
+                    openPos = i;
+                    hasPipe = false;
+                }
+                depth++;
+            } else if (c == '|' && depth > 0) {
+                hasPipe = true;
+            } else if (c == ')') {
+                depth--;
+                if (depth == 0 && hasPipe && openPos >= 0) {
+                    positions.add(openPos);
+                    positions.add(i);
+                    for (int j = openPos + 1; j < i; j++) {
+                        if (glob.charAt(j) == '|') positions.add(j);
+                    }
+                }
+            }
+        }
+        return positions;
     }
 
     private static <T> List<List<T>> partitionList(List<T> list, int chunkSize) {
