@@ -51,8 +51,16 @@ public interface BuildTool {
             Path jarPath,
             boolean hasSourceJar,
             boolean indirect,
-            String pomPath
+            String pomPath,
+            ResolvedDependency baseDep
     ) {
+        public ResolvedDependency(String groupId, String artifactId, String version,
+                                  String classifier, String scope, Path jarPath,
+                                  boolean hasSourceJar, boolean indirect, String pomPath) {
+            this(groupId, artifactId, version, classifier, scope, jarPath,
+                    hasSourceJar, indirect, pomPath, null);
+        }
+
         public String name() {
             return groupId + "." + artifactId;
         }

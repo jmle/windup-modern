@@ -543,6 +543,22 @@ public class WorkspaceContext {
             d.setFileURIPrefix(Path.of(dep.pomPath()).toUri().toString());
         }
 
+        if (dep.indirect() && dep.baseDep() != null) {
+            BuildTool.ResolvedDependency base = dep.baseDep();
+            Struct.Builder baseExtras = Struct.newBuilder()
+                    .putFields("groupId", Value.newBuilder().setStringValue(base.groupId()).build())
+                    .putFields("artifactId", Value.newBuilder().setStringValue(base.artifactId()).build());
+            if (base.pomPath() != null) {
+                baseExtras.putFields("pomPath", Value.newBuilder().setStringValue(base.pomPath()).build());
+            }
+            Struct baseDepStruct = Struct.newBuilder()
+                    .putFields("name", Value.newBuilder().setStringValue(base.name()).build())
+                    .putFields("version", Value.newBuilder().setStringValue(base.version() != null ? base.version() : "").build())
+                    .putFields("extras", Value.newBuilder().setStructValue(baseExtras.build()).build())
+                    .build();
+            extras.putFields("baseDep", Value.newBuilder().setStructValue(baseDepStruct).build());
+        }
+
         d.setExtras(extras);
 
         Map<String, String> labels = labeler.getLabels(dep);

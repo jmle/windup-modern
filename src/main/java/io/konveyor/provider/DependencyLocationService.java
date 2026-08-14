@@ -71,16 +71,26 @@ public class DependencyLocationService
             if (line.contains("<dependencies")) inDependencies = true;
             if (!inDependencies) continue;
 
-            if (line.contains("<groupId>") && line.contains(groupId)) {
+            if (xmlTagEquals(line, "groupId", groupId)) {
                 for (int j = Math.max(0, i - 3); j <= Math.min(lines.size() - 1, i + 3); j++) {
-                    if (j != i && lines.get(j).trim().contains("<artifactId>")
-                            && lines.get(j).trim().contains(artifactId)) {
+                    if (j != i && xmlTagEquals(lines.get(j).trim(), "artifactId", artifactId)) {
                         return Math.min(i, j) + 1;
                     }
                 }
             }
         }
         return 0;
+    }
+
+    private static boolean xmlTagEquals(String line, String tag, String value) {
+        String open = "<" + tag + ">";
+        String close = "</" + tag + ">";
+        int start = line.indexOf(open);
+        if (start < 0) return false;
+        int end = line.indexOf(close, start);
+        if (end < 0) return false;
+        String content = line.substring(start + open.length(), end).trim();
+        return content.equals(value);
     }
 
     static int findInGradle(List<String> lines, String groupId, String artifactId) {

@@ -216,16 +216,23 @@ public class MavenBuildTool implements BuildTool {
 
     private DagEntry buildDagEntry(DependencyNode node, Path localRepo, String pomPath,
                                    boolean indirect) {
-        ResolvedDependency dep = toResolvedDependency(node, localRepo, pomPath, indirect);
+        return buildDagEntry(node, localRepo, pomPath, indirect, null);
+    }
+
+    private DagEntry buildDagEntry(DependencyNode node, Path localRepo, String pomPath,
+                                   boolean indirect, ResolvedDependency rootDirect) {
+        ResolvedDependency dep = toResolvedDependency(node, localRepo, pomPath, indirect, rootDirect);
+        ResolvedDependency parentForChildren = rootDirect != null ? rootDirect : dep;
         List<DagEntry> children = new ArrayList<>();
         for (DependencyNode child : node.getChildren()) {
-            children.add(buildDagEntry(child, localRepo, pomPath, true));
+            children.add(buildDagEntry(child, localRepo, pomPath, true, parentForChildren));
         }
         return new DagEntry(dep, children);
     }
 
     private ResolvedDependency toResolvedDependency(DependencyNode node, Path localRepo,
-                                                    String pomPath, boolean indirect) {
+                                                    String pomPath, boolean indirect,
+                                                    ResolvedDependency baseDep) {
         Artifact artifact = node.getArtifact();
         if (artifact == null) {
             return new ResolvedDependency("", "", "", null, "compile", null, false, indirect, pomPath);
@@ -244,7 +251,7 @@ public class MavenBuildTool implements BuildTool {
 
         return new ResolvedDependency(
                 groupId, artifactId, version, classifier, scope, jarPath, hasSource,
-                indirect, pomPath);
+                indirect, pomPath, baseDep);
     }
 
     private Model parsePom(Path pomFile) throws Exception {

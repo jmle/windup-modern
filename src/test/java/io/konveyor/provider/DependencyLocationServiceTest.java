@@ -30,7 +30,7 @@ class DependencyLocationServiceTest {
                 """);
 
         int line = DependencyLocationService.findDependencyLine(pom, "org.springframework", "spring-core");
-        assertThat(line).isEqualTo(3);
+        assertThat(line).isEqualTo(4);
     }
 
     @Test
@@ -54,7 +54,7 @@ class DependencyLocationServiceTest {
                 """);
 
         int line = DependencyLocationService.findDependencyLine(pom, "org.slf4j", "slf4j-api");
-        assertThat(line).isEqualTo(8);
+        assertThat(line).isEqualTo(9);
     }
 
     @Test
@@ -89,7 +89,7 @@ class DependencyLocationServiceTest {
                 """);
 
         int line = DependencyLocationService.findDependencyLine(gradle, "org.slf4j", "slf4j-api");
-        assertThat(line).isEqualTo(5);
+        assertThat(line).isEqualTo(6);
     }
 
     @Test
