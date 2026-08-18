@@ -207,9 +207,18 @@ public class SymbolIndex {
         return dependencyFileUris.contains(fileUri);
     }
 
+    private static final List<LocationType> DEFAULT_LOCATIONS = List.of(
+            LocationType.TYPE, LocationType.METHOD_CALL, LocationType.CONSTRUCTOR_CALL,
+            LocationType.ANNOTATION, LocationType.IMPORT
+    );
+
     public List<IndexedSymbol> query(String pattern, LocationType location) {
         if (location == LocationType.PACKAGE) {
             return queryPackage(pattern);
+        }
+
+        if (location == LocationType.DEFAULT) {
+            return queryDefault(pattern);
         }
 
         // TYPE_KEYWORD ("type" location string) searches the TYPE location
@@ -240,6 +249,21 @@ public class SymbolIndex {
             }
         }
 
+        return matches;
+    }
+
+    private List<IndexedSymbol> queryDefault(String pattern) {
+        String effectivePattern = stripTypeParameters(pattern);
+        Pattern regex = globToRegex(effectivePattern);
+        List<IndexedSymbol> matches = new ArrayList<>();
+
+        for (LocationType loc : DEFAULT_LOCATIONS) {
+            for (IndexedSymbol sym : byLocation.getOrDefault(loc, List.of())) {
+                if (matchesSymbol(sym, regex, effectivePattern, loc, isTypeReferenceLocation(loc))) {
+                    matches.add(sym);
+                }
+            }
+        }
         return matches;
     }
 

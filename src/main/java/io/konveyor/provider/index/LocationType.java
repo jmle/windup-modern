@@ -7,6 +7,7 @@ package io.konveyor.provider.index;
  * and filter query results.
  */
 public enum LocationType {
+    DEFAULT,
     TYPE,
     INHERITANCE,
     METHOD_CALL,
@@ -25,7 +26,7 @@ public enum LocationType {
 
     public static LocationType fromString(String s) {
         if (s == null || s.isEmpty()) {
-            return TYPE;
+            return DEFAULT;
         }
         return switch (s.toLowerCase()) {
             case "inheritance" -> INHERITANCE;

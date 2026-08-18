@@ -412,6 +412,11 @@ public class WorkspaceContext {
                 lineNumber = "pom.xml".equals(buildFile)
                         ? DependencyLocationService.findInPom(buildFileLines, dep.groupId(), dep.artifactId())
                         : DependencyLocationService.findInGradle(buildFileLines, dep.groupId(), dep.artifactId());
+                if (lineNumber == 0 && dep.baseDep() != null) {
+                    lineNumber = "pom.xml".equals(buildFile)
+                            ? DependencyLocationService.findInPom(buildFileLines, dep.baseDep().groupId(), dep.baseDep().artifactId())
+                            : DependencyLocationService.findInGradle(buildFileLines, dep.baseDep().groupId(), dep.baseDep().artifactId());
+                }
             }
 
             Struct.Builder vars = Struct.newBuilder()
