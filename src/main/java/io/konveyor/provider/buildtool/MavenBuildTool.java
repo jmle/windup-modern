@@ -88,7 +88,47 @@ public class MavenBuildTool implements BuildTool {
             return dag;
 
         } catch (Exception e) {
-            LOG.error("Failed to resolve Maven dependencies in {}", projectDir, e);
+            LOG.warn("Aether dependency resolution failed, falling back to pom.xml parsing: {}", e.getMessage());
+            return fallbackFromPom(pomFile);
+        }
+    }
+
+    private List<DagEntry> fallbackFromPom(Path pomFile) {
+        try {
+            Model model = parsePom(pomFile);
+            java.util.Properties properties = buildProperties(model, null);
+            String pomPath = pomFile.toAbsolutePath().toString();
+            Path localRepo = getLocalRepoPath();
+            List<DagEntry> dag = new ArrayList<>();
+
+            for (org.apache.maven.model.Dependency modelDep : model.getDependencies()) {
+                String version = modelDep.getVersion();
+                if (version == null) {
+                    version = findManagedVersion(model, modelDep.getGroupId(), modelDep.getArtifactId());
+                }
+                version = resolveProperties(version, properties);
+
+                String groupId = resolveProperties(modelDep.getGroupId(), properties);
+                String artifactId = resolveProperties(modelDep.getArtifactId(), properties);
+                String scope = modelDep.getScope() != null ? modelDep.getScope() : "compile";
+                String classifier = modelDep.getClassifier();
+
+                Path jarPath = version != null
+                        ? resolveJarPath(localRepo, groupId, artifactId, version, classifier,
+                                modelDep.getType() != null ? modelDep.getType() : "jar")
+                        : null;
+
+                ResolvedDependency dep = new ResolvedDependency(
+                        groupId, artifactId, version, classifier, scope, jarPath,
+                        jarPath != null && java.nio.file.Files.exists(sourceJarPath(jarPath)),
+                        false, pomPath);
+                dag.add(new DagEntry(dep, List.of()));
+            }
+
+            LOG.info("Fallback: parsed {} direct dependencies from {}", dag.size(), pomFile);
+            return dag;
+        } catch (Exception e) {
+            LOG.error("Fallback pom parsing also failed for {}", pomFile, e);
             return List.of();
         }
     }

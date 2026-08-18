@@ -595,6 +595,14 @@ public class WorkspaceContext {
                 if (dep.classifier() != null) {
                     d.setClassifier(dep.classifier());
                 }
+                Struct.Builder extras = Struct.newBuilder()
+                        .putFields("groupId", Value.newBuilder().setStringValue(dep.groupId()).build())
+                        .putFields("artifactId", Value.newBuilder().setStringValue(dep.artifactId()).build());
+                if (dep.fileUri() != null) {
+                    extras.putFields("pomPath", Value.newBuilder().setStringValue(dep.fileUri()).build());
+                    d.setFileURIPrefix(dep.fileUri());
+                }
+                d.setExtras(extras);
                 depList.addDeps(d);
             }
             response.addFileDep(FileDep.newBuilder()
