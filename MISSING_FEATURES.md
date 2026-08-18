@@ -9,7 +9,8 @@ dependency resolution, WAR/EAR archive handling, dependency labeling, `mvn://` a
 download, `includedPaths` config, `filepaths` condition parameter, `depOpenSourceLabelsFile`
 config wiring, Maven settings generation + proxy support, `GetDependenciesDAG`, file encoding
 support, dependency caching, multi-module Maven, binary artifact identification via SHA +
-pom.properties, Gradle full parity) have been removed from this list.
+pom.properties, Gradle full parity, default location broadening, Maven resolution fallback,
+static-parsed dependency extras, binary archive dependency indexing) have been removed from this list.
 
 ---
 
@@ -55,4 +56,4 @@ included in query results. The engine filters them post-return.
 | Status | Features |
 |--------|----------|
 | **Remaining** | 1. `depLabelSelector` filtering (low priority — engine handles it) |
-| **Completed** | File encoding, dependency caching, multi-module Maven, binary artifact ID, Gradle full parity |
+| **Completed** | File encoding, dependency caching, multi-module Maven, binary artifact ID, Gradle full parity, default location broadening, Maven resolution fallback, static-parsed dependency extras, binary archive dependency indexing |

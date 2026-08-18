@@ -2,6 +2,7 @@ package io.konveyor.provider;
 
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
+import io.konveyor.provider.buildtool.BinaryBuildTool;
 import io.konveyor.provider.buildtool.BuildTool;
 import io.konveyor.provider.buildtool.BuildToolDetector;
 import io.konveyor.provider.buildtool.DependencyCache;
@@ -155,6 +156,34 @@ public class WorkspaceContext {
         for (Path sourceDir : result.sourceDirs()) {
             if (Files.isDirectory(sourceDir)) {
                 symbolIndex.indexDirectory(sourceDir);
+            }
+        }
+
+        List<Path> depJars = result.dependencyJars();
+        if (!depJars.isEmpty()) {
+            String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
+            Path mavenIndexPath = mavenIndexPathStr != null ? Path.of(mavenIndexPathStr) : null;
+            buildTool = new BinaryBuildTool(mavenIndexPath);
+
+            resolvedDeps = new ArrayList<>();
+            for (Path jar : depJars) {
+                resolvedDeps.add(((BinaryBuildTool) buildTool).identifyJar(jar));
+            }
+            resolvedDag = resolvedDeps.stream()
+                    .map(d -> new BuildTool.DagEntry(d, List.of()))
+                    .toList();
+            LOG.info("Identified {} dependency JARs from archive {}", resolvedDeps.size(), archivePath.getFileName());
+
+            DependencyResolver resolver = new DependencyResolver(decompiler);
+            try {
+                DependencyResolver.ResolveResult depResult = resolver.resolve(resolvedDeps, workDir);
+                if (!depResult.sourceDirs().isEmpty()) {
+                    indexDependencySources(depResult.sourceDirs());
+                    LOG.info("Indexed {} dependency source dirs from archive ({} decompiled)",
+                            depResult.sourceDirs().size(), depResult.decompiledCount());
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to resolve dependency sources from archive: {}", e.getMessage());
             }
         }
     }
@@ -388,16 +417,24 @@ public class WorkspaceContext {
             namePattern = Pattern.compile(nameRegex);
         }
 
-        String buildFile = buildTool.getType() == BuildTool.Type.GRADLE
-                ? "build.gradle" : "pom.xml";
-        Path buildFilePath = Path.of(location, buildFile);
-        String buildFileUri = buildFilePath.toUri().toString();
-
+        Path locationPath = Path.of(location);
+        String buildFileUri;
         List<String> buildFileLines;
-        try {
-            buildFileLines = Files.readAllLines(buildFilePath);
-        } catch (IOException e) {
+        String buildFile;
+        if (isArchive(locationPath)) {
+            buildFileUri = locationPath.toUri().toString();
             buildFileLines = List.of();
+            buildFile = null;
+        } else {
+            buildFile = buildTool.getType() == BuildTool.Type.GRADLE
+                    ? "build.gradle" : "pom.xml";
+            Path buildFilePath = locationPath.resolve(buildFile);
+            buildFileUri = buildFilePath.toUri().toString();
+            try {
+                buildFileLines = Files.readAllLines(buildFilePath);
+            } catch (IOException e) {
+                buildFileLines = List.of();
+            }
         }
 
         ProviderEvaluateResponse.Builder response = ProviderEvaluateResponse.newBuilder();
@@ -479,7 +516,10 @@ public class WorkspaceContext {
     }
 
     private DependencyResponse getDependenciesFromBuildTool() {
-        String buildFileUri = Path.of(location, "pom.xml").toUri().toString();
+        Path locationPath = Path.of(location);
+        String buildFileUri = isArchive(locationPath)
+                ? locationPath.toUri().toString()
+                : locationPath.resolve("pom.xml").toUri().toString();
 
         DependencyList.Builder depList = DependencyList.newBuilder();
         for (BuildTool.ResolvedDependency dep : resolvedDeps) {
@@ -503,7 +543,10 @@ public class WorkspaceContext {
                     .build();
         }
 
-        String buildFileUri = Path.of(location, "pom.xml").toUri().toString();
+        Path locationPath = Path.of(location);
+        String buildFileUri = isArchive(locationPath)
+                ? locationPath.toUri().toString()
+                : locationPath.resolve("pom.xml").toUri().toString();
 
         FileDAGDep.Builder fileDag = FileDAGDep.newBuilder()
                 .setFileURI(buildFileUri);

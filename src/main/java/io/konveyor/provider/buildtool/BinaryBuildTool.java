@@ -55,7 +55,7 @@ public class BinaryBuildTool implements BuildTool {
         return deps;
     }
 
-    ResolvedDependency identifyJar(Path jarFile) {
+    public ResolvedDependency identifyJar(Path jarFile) {
         if (shaIndex != null) {
             Optional<MavenShaIndex.MavenCoordinates> coords = shaIndex.lookup(jarFile);
             if (coords.isPresent()) {
