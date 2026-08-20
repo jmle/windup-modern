@@ -52,7 +52,7 @@ jobs:
 
       - name: Clone and build koncur
         run: |
-          git clone --depth 1 https://github.com/konveyor/koncur.git /tmp/koncur
+          git clone --depth 1 --branch koncur-new-java-provider https://github.com/konveyor/koncur.git /tmp/koncur
           cd /tmp/koncur
           go build -o $HOME/.local/bin/koncur ./cmd/koncur/main.go
 
