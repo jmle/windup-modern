@@ -44,6 +44,7 @@ public class WorkspaceContext {
     private BuildTool buildTool;
     private List<BuildTool.ResolvedDependency> resolvedDeps;
     private List<BuildTool.DagEntry> resolvedDag;
+    private Path archiveProjectDir;
 
     public WorkspaceContext(long id, String location, String analysisMode, Config config, int contextLines) {
         this.id = id;
@@ -146,12 +147,12 @@ public class WorkspaceContext {
     }
 
     private void indexArchive(Path archivePath) throws IOException {
-        Path workDir = archivePath.getParent().resolve(".java-provider-work");
-        Files.createDirectories(workDir);
+        archiveProjectDir = archivePath.getParent().resolve("java-project");
+        Files.createDirectories(archiveProjectDir);
 
         var decompiler = new io.konveyor.provider.decompiler.VineflowerDecompiler();
         var handler = new io.konveyor.provider.decompiler.ArchiveHandler(decompiler);
-        var result = handler.handleArchive(archivePath, workDir);
+        var result = handler.handleArchive(archivePath, archiveProjectDir);
 
         for (Path sourceDir : result.sourceDirs()) {
             if (Files.isDirectory(sourceDir)) {
@@ -174,9 +175,15 @@ public class WorkspaceContext {
                     .toList();
             LOG.info("Identified {} dependency JARs from archive {}", resolvedDeps.size(), archivePath.getFileName());
 
+            Path pomXml = archiveProjectDir.resolve("pom.xml");
+            if (!Files.exists(pomXml)) {
+                generateSyntheticPom(pomXml, resolvedDeps);
+            }
+
+            Path depWorkDir = Path.of(System.getProperty("user.home"), ".java-provider-work", String.valueOf(id));
             DependencyResolver resolver = new DependencyResolver(decompiler);
             try {
-                DependencyResolver.ResolveResult depResult = resolver.resolve(resolvedDeps, workDir);
+                DependencyResolver.ResolveResult depResult = resolver.resolve(resolvedDeps, depWorkDir);
                 if (!depResult.sourceDirs().isEmpty()) {
                     indexDependencySources(depResult.sourceDirs());
                     LOG.info("Indexed {} dependency source dirs from archive ({} decompiled)",
@@ -186,6 +193,45 @@ public class WorkspaceContext {
                 LOG.warn("Failed to resolve dependency sources from archive: {}", e.getMessage());
             }
         }
+    }
+
+    private void generateSyntheticPom(Path pomPath, List<BuildTool.ResolvedDependency> deps) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        sb.append("<project xmlns=\"http://maven.apache.org/POM/4.0.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n");
+        sb.append("  xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd\">\n");
+        sb.append("  <modelVersion>4.0.0</modelVersion>\n\n");
+        sb.append("  <groupId>io.konveyor</groupId>\n");
+        sb.append("  <artifactId>java-project</artifactId>\n");
+        sb.append("  <version>1.0-SNAPSHOT</version>\n\n");
+        sb.append("  <name>java-project</name>\n");
+        sb.append("  <url>http://www.konveyor.io</url>\n\n");
+        sb.append("  <properties>\n");
+        sb.append("    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>\n");
+        sb.append("  </properties>\n\n");
+        sb.append("  <dependencies>\n");
+        for (BuildTool.ResolvedDependency dep : deps) {
+            sb.append("\n    <dependency>\n");
+            sb.append("      <groupId>").append(escapeXml(dep.groupId())).append("</groupId>\n");
+            sb.append("      <artifactId>").append(escapeXml(dep.artifactId())).append("</artifactId>\n");
+            sb.append("      <version>").append(escapeXml(dep.version() != null ? dep.version() : "")).append("</version>\n");
+            sb.append("    </dependency>\n");
+        }
+        sb.append("\n  </dependencies>\n\n");
+        sb.append("  <build>\n");
+        sb.append("  </build>\n");
+        sb.append("</project>\n");
+
+        try {
+            Files.writeString(pomPath, sb.toString());
+            LOG.info("Generated synthetic pom.xml with {} dependencies", deps.size());
+        } catch (IOException e) {
+            LOG.warn("Failed to generate synthetic pom.xml: {}", e.getMessage());
+        }
+    }
+
+    private static String escapeXml(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private void resolveDependencySources(Path projectDir) {
@@ -421,10 +467,15 @@ public class WorkspaceContext {
         String buildFileUri;
         List<String> buildFileLines;
         String buildFile;
-        if (isArchive(locationPath)) {
-            buildFileUri = locationPath.toUri().toString();
-            buildFileLines = List.of();
-            buildFile = null;
+        if (archiveProjectDir != null) {
+            Path pomPath = archiveProjectDir.resolve("pom.xml");
+            buildFileUri = pomPath.toUri().toString();
+            buildFile = "pom.xml";
+            try {
+                buildFileLines = Files.exists(pomPath) ? Files.readAllLines(pomPath) : List.of();
+            } catch (IOException e) {
+                buildFileLines = List.of();
+            }
         } else {
             buildFile = buildTool.getType() == BuildTool.Type.GRADLE
                     ? "build.gradle" : "pom.xml";
@@ -516,10 +567,12 @@ public class WorkspaceContext {
     }
 
     private DependencyResponse getDependenciesFromBuildTool() {
-        Path locationPath = Path.of(location);
-        String buildFileUri = isArchive(locationPath)
-                ? locationPath.toUri().toString()
-                : locationPath.resolve("pom.xml").toUri().toString();
+        String buildFileUri;
+        if (archiveProjectDir != null) {
+            buildFileUri = archiveProjectDir.resolve("pom.xml").toUri().toString();
+        } else {
+            buildFileUri = Path.of(location).resolve("pom.xml").toUri().toString();
+        }
 
         DependencyList.Builder depList = DependencyList.newBuilder();
         for (BuildTool.ResolvedDependency dep : resolvedDeps) {
@@ -543,10 +596,12 @@ public class WorkspaceContext {
                     .build();
         }
 
-        Path locationPath = Path.of(location);
-        String buildFileUri = isArchive(locationPath)
-                ? locationPath.toUri().toString()
-                : locationPath.resolve("pom.xml").toUri().toString();
+        String buildFileUri;
+        if (archiveProjectDir != null) {
+            buildFileUri = archiveProjectDir.resolve("pom.xml").toUri().toString();
+        } else {
+            buildFileUri = Path.of(location).resolve("pom.xml").toUri().toString();
+        }
 
         FileDAGDep.Builder fileDag = FileDAGDep.newBuilder()
                 .setFileURI(buildFileUri);

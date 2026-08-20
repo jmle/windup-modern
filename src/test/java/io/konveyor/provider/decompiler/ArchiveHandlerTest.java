@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,26 +38,66 @@ class ArchiveHandlerTest {
     }
 
     @Test
-    void shouldHandleJar() throws Exception {
+    void shouldHandleJarToMavenStructure() throws Exception {
         Path jar = createCompiledJar("test.jar", "Foo");
-        Path workDir = tempDir.resolve("work");
+        Path projectDir = tempDir.resolve("java-project");
 
-        ArchiveHandler.ArchiveResult result = handler.handleArchive(jar, workDir);
+        ArchiveHandler.ArchiveResult result = handler.handleArchive(jar, projectDir);
 
         assertThat(result.archivePath()).isEqualTo(jar);
         assertThat(result.sourceDirs()).isNotEmpty();
         assertThat(result.dependencyJars()).isEmpty();
+        assertThat(projectDir.resolve("src/main/java")).isDirectory();
     }
 
     @Test
-    void shouldHandleWar() throws Exception {
+    void shouldHandleWarToMavenStructure() throws Exception {
         Path war = createTestWar();
-        Path workDir = tempDir.resolve("work");
+        Path projectDir = tempDir.resolve("java-project");
 
-        ArchiveHandler.ArchiveResult result = handler.handleArchive(war, workDir);
+        ArchiveHandler.ArchiveResult result = handler.handleArchive(war, projectDir);
 
         assertThat(result.archivePath()).isEqualTo(war);
         assertThat(result.dependencyJars()).isNotEmpty();
+
+        assertThat(projectDir.resolve("src/main/java")).isDirectory();
+        assertThat(projectDir.resolve("src/main/webapp/WEB-INF/web.xml")).exists();
+    }
+
+    @Test
+    void shouldCopyNonClassResourcesFromClasses() throws Exception {
+        Path war = createWarWithResources();
+        Path projectDir = tempDir.resolve("java-project");
+
+        handler.handleArchive(war, projectDir);
+
+        assertThat(projectDir.resolve("src/main/java/META-INF/persistence.xml")).exists();
+        String content = Files.readString(projectDir.resolve("src/main/java/META-INF/persistence.xml"));
+        assertThat(content).contains("persistence-unit");
+    }
+
+    @Test
+    void shouldExtractPomXmlFromMetaInfMaven() throws Exception {
+        Path war = createWarWithPom();
+        Path projectDir = tempDir.resolve("java-project");
+
+        handler.handleArchive(war, projectDir);
+
+        assertThat(projectDir.resolve("pom.xml")).exists();
+        String content = Files.readString(projectDir.resolve("pom.xml"));
+        assertThat(content).contains("<groupId>com.test</groupId>");
+    }
+
+    @Test
+    void shouldCopyWebResources() throws Exception {
+        Path war = createWarWithWebResources();
+        Path projectDir = tempDir.resolve("java-project");
+
+        handler.handleArchive(war, projectDir);
+
+        assertThat(projectDir.resolve("src/main/webapp/WEB-INF/web.xml")).exists();
+        assertThat(projectDir.resolve("src/main/webapp/index.html")).exists();
+        assertThat(projectDir.resolve("src/main/webapp/css/style.css")).exists();
     }
 
     private Path createSimpleJar(String name, String... entries) throws IOException {
@@ -105,6 +146,7 @@ class ArchiveHandlerTest {
         Path warStaging = tempDir.resolve("war-staging");
         Path webInfClasses = warStaging.resolve("WEB-INF/classes/com/example");
         Path webInfLib = warStaging.resolve("WEB-INF/lib");
+        Path webInf = warStaging.resolve("WEB-INF");
         Files.createDirectories(webInfClasses);
         Files.createDirectories(webInfLib);
 
@@ -123,10 +165,105 @@ class ArchiveHandlerTest {
 
         Files.copy(libJar, webInfLib.resolve("dep.jar"));
 
+        Files.writeString(webInf.resolve("web.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <web-app><display-name>test</display-name></web-app>
+                """);
+
         Path warPath = tempDir.resolve("test.war");
         new ProcessBuilder("jar", "cf", warPath.toString(), "-C", warStaging.toString(), ".")
                 .redirectErrorStream(true).start().waitFor();
 
+        return warPath;
+    }
+
+    private Path createWarWithResources() throws Exception {
+        Path warStaging = tempDir.resolve("war-resources-staging");
+        Path classesDir = warStaging.resolve("WEB-INF/classes/com/example");
+        Path metaInf = warStaging.resolve("WEB-INF/classes/META-INF");
+        Files.createDirectories(classesDir);
+        Files.createDirectories(metaInf);
+
+        Files.writeString(classesDir.resolve("App.java"), """
+                package com.example;
+                public class App { public void run() {} }
+                """);
+
+        new ProcessBuilder("javac", "-d", warStaging.resolve("WEB-INF/classes").toString(),
+                classesDir.resolve("App.java").toString())
+                .redirectErrorStream(true).start().waitFor();
+        Files.deleteIfExists(classesDir.resolve("App.java"));
+
+        Files.writeString(metaInf.resolve("persistence.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <persistence><persistence-unit name="test"/></persistence>
+                """);
+
+        Path webInf = warStaging.resolve("WEB-INF");
+        Files.writeString(webInf.resolve("web.xml"), "<web-app/>");
+
+        Path warPath = tempDir.resolve("resources.war");
+        new ProcessBuilder("jar", "cf", warPath.toString(), "-C", warStaging.toString(), ".")
+                .redirectErrorStream(true).start().waitFor();
+        return warPath;
+    }
+
+    private Path createWarWithPom() throws Exception {
+        Path warStaging = tempDir.resolve("war-pom-staging");
+        Path classesDir = warStaging.resolve("WEB-INF/classes/com/example");
+        Path mavenDir = warStaging.resolve("META-INF/maven/com.test/test-app");
+        Files.createDirectories(classesDir);
+        Files.createDirectories(mavenDir);
+
+        Files.writeString(classesDir.resolve("App.java"), """
+                package com.example;
+                public class App { public void run() {} }
+                """);
+
+        new ProcessBuilder("javac", "-d", warStaging.resolve("WEB-INF/classes").toString(),
+                classesDir.resolve("App.java").toString())
+                .redirectErrorStream(true).start().waitFor();
+        Files.deleteIfExists(classesDir.resolve("App.java"));
+
+        Files.writeString(mavenDir.resolve("pom.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project>
+                  <groupId>com.test</groupId>
+                  <artifactId>test-app</artifactId>
+                  <version>1.0</version>
+                </project>
+                """);
+
+        Path warPath = tempDir.resolve("withpom.war");
+        new ProcessBuilder("jar", "cf", warPath.toString(), "-C", warStaging.toString(), ".")
+                .redirectErrorStream(true).start().waitFor();
+        return warPath;
+    }
+
+    private Path createWarWithWebResources() throws Exception {
+        Path warStaging = tempDir.resolve("war-web-staging");
+        Path classesDir = warStaging.resolve("WEB-INF/classes/com/example");
+        Path cssDir = warStaging.resolve("css");
+        Files.createDirectories(classesDir);
+        Files.createDirectories(cssDir);
+
+        Files.writeString(classesDir.resolve("App.java"), """
+                package com.example;
+                public class App { public void run() {} }
+                """);
+
+        new ProcessBuilder("javac", "-d", warStaging.resolve("WEB-INF/classes").toString(),
+                classesDir.resolve("App.java").toString())
+                .redirectErrorStream(true).start().waitFor();
+        Files.deleteIfExists(classesDir.resolve("App.java"));
+
+        Files.writeString(warStaging.resolve("WEB-INF/web.xml"), "<web-app/>");
+        Files.writeString(warStaging.resolve("index.html"), "<html><body>Hello</body></html>");
+        Files.writeString(cssDir.resolve("style.css"), "body { color: black; }");
+
+        Path warPath = tempDir.resolve("webresources.war");
+        new ProcessBuilder("jar", "cf", warPath.toString(), "-C", warStaging.toString(), ".")
+                .redirectErrorStream(true).start().waitFor();
         return warPath;
     }
 }

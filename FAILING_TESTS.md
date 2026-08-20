@@ -6,15 +6,23 @@ Status as of CI run [32121844946](https://github.com/jmle/windup-modern/actions/
 
 ---
 
-## 1. acmeair-webapp (4 errors) -- Missing Feature
+## 1. acmeair-webapp (4 errors) -- Fix Applied
 
 **Mode:** binary (WAR file)
 
-All 4 errors are missing rulesets (`discovery-rules`, `eap8/eap7`, `jakarta-ee9`, `technology-usage`). The provider starts and completes analysis, but the binary WAR analysis path does not produce enough data for rule matching.
+All 4 errors were missing rulesets (`discovery-rules`, `eap8/eap7`, `jakarta-ee9`, `technology-usage`).
 
-**Root cause:** Binary analysis of WAR/EAR archives is not fully implemented. The provider can extract and decompile JARs, but rule matching on decompiled sources does not reach the same coverage as source analysis. The Go provider delegates binary analysis to JDTLS which handles it internally.
+**Root cause:** The Go provider decompiles WAR archives into a `java-project/` directory with Maven project structure (`src/main/java/`, `src/main/webapp/`, `pom.xml`). The kantra engine's builtin provider walks this directory for file discovery and XML matching. Our provider was creating files in a hidden `.java-provider-work/` directory with a flat structure — the engine couldn't find the decompiled files, so all four rulesets produced no output.
 
-**Classification: Our gap.** This is a real missing feature. Tracked in MISSING_FEATURES.md as a known limitation.
+**Fix applied:** Restructured `ArchiveHandler` to create Go-compatible Maven project structure in `java-project/`:
+- Decompiled WEB-INF/classes → `java-project/src/main/java/` (with non-class resources like META-INF/persistence.xml)
+- Web resources (web.xml, CSS, JS, HTML) → `java-project/src/main/webapp/`
+- Extracted pom.xml from META-INF/maven/ → `java-project/pom.xml`
+- Synthetic pom.xml generated from identified dependency JARs when no pom.xml found in WAR
+- Dependency decompilation work dir moved to `~/.java-provider-work/` (outside source tree)
+- `evaluateDependency`, `getDependencies`, `getDependenciesDAG` now reference the project's pom.xml instead of the WAR file URI
+
+**Classification: Fix pending CI validation.**
 
 ---
 
@@ -100,7 +108,7 @@ Several dependency rules (`mvc-01220`, `observability-0100`, `database-03000`, `
 
 | Test | Errors | Classification | Status |
 |---|---|---|---|
-| acmeair-webapp | 4 | Our gap | Needs binary WAR analysis improvement |
+| acmeair-webapp | 4 | Fix applied | java-project structure + pom.xml, pending CI |
 | Daytrader | 13 | False positive | Golden files updated |
 | Petclinic | timeout | CI infrastructure | Not actionable from provider side |
 | Seam booking | 45 | False positive | Golden files updated |
@@ -108,4 +116,5 @@ Several dependency rules (`mvc-01220`, `observability-0100`, `database-03000`, `
 
 **Errors that are real bugs on our side:** ~18 (10 missing transitive deps + 8 line numbers, all in Customer-Tomcat-Legacy)
 **Errors fixed via golden file updates:** ~58 (13 Daytrader + 45 Seam booking)
-**Not errors at all:** Petclinic timeout (infra), acmeair (known missing feature)
+**Errors fixed via code changes:** 4 (acmeair binary project structure, pending CI)
+**Not errors at all:** Petclinic timeout (infra)
