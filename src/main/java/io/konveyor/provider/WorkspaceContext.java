@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 /**
@@ -45,6 +46,7 @@ public class WorkspaceContext {
     private List<BuildTool.ResolvedDependency> resolvedDeps;
     private List<BuildTool.DagEntry> resolvedDag;
     private Path archiveProjectDir;
+    private volatile CompletableFuture<Void> depResolutionFuture;
 
     public WorkspaceContext(long id, String location, String analysisMode, Config config, int contextLines) {
         this.id = id;
@@ -101,32 +103,44 @@ public class WorkspaceContext {
         LOG.info("Workspace {} indexed: {} symbols from application source", id, symbolIndex.size());
 
         if (!isArchive(root)) {
-            String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
-            Path mavenIndexPath = mavenIndexPathStr != null ? Path.of(mavenIndexPathStr) : null;
-            buildTool = BuildToolDetector.detect(root, mavenIndexPath);
-            try {
-                Path buildFile = detectBuildFile(root);
-                DependencyCache cache = buildFile != null ? new DependencyCache(buildFile) : null;
-                if (cache != null && cache.isValid()) {
-                    resolvedDag = cache.getCached();
-                    resolvedDeps = BuildTool.flattenDag(resolvedDag);
-                    LOG.info("Using cached dependencies ({} top-level) for workspace {}", resolvedDag.size(), id);
-                } else {
-                    resolvedDag = buildTool.getDependenciesDAG(root);
-                    resolvedDeps = BuildTool.flattenDag(resolvedDag);
-                    if (cache != null) cache.store(resolvedDag);
-                    LOG.info("Resolved {} dependencies ({} top-level) via {} for workspace {}",
-                            resolvedDeps.size(), resolvedDag.size(), buildTool.getType(), id);
-                }
-            } catch (Exception e) {
-                LOG.warn("Dependency resolution failed, falling back to static parsing: {}", e.getMessage());
-                resolvedDag = List.of();
-                resolvedDeps = List.of();
-            }
+            depResolutionFuture = CompletableFuture.runAsync(() -> resolveDependenciesBackground(root));
+        }
+    }
 
-            if (!resolvedDeps.isEmpty() && !"source-only".equals(analysisMode)) {
-                resolveDependencySources(root);
+    private void resolveDependenciesBackground(Path root) {
+        LOG.info("Starting background dependency resolution for workspace {}", id);
+        String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
+        Path mavenIndexPath = mavenIndexPathStr != null ? Path.of(mavenIndexPathStr) : null;
+        buildTool = BuildToolDetector.detect(root, mavenIndexPath);
+        try {
+            Path buildFile = detectBuildFile(root);
+            DependencyCache cache = buildFile != null ? new DependencyCache(buildFile) : null;
+            if (cache != null && cache.isValid()) {
+                resolvedDag = cache.getCached();
+                resolvedDeps = BuildTool.flattenDag(resolvedDag);
+                LOG.info("Using cached dependencies ({} top-level) for workspace {}", resolvedDag.size(), id);
+            } else {
+                resolvedDag = buildTool.getDependenciesDAG(root);
+                resolvedDeps = BuildTool.flattenDag(resolvedDag);
+                if (cache != null) cache.store(resolvedDag);
+                LOG.info("Resolved {} dependencies ({} top-level) via {} for workspace {}",
+                        resolvedDeps.size(), resolvedDag.size(), buildTool.getType(), id);
             }
+        } catch (Exception e) {
+            LOG.warn("Dependency resolution failed, falling back to static parsing: {}", e.getMessage());
+            resolvedDag = List.of();
+            resolvedDeps = List.of();
+        }
+
+        if (!resolvedDeps.isEmpty() && !"source-only".equals(analysisMode)) {
+            resolveDependencySources(root);
+        }
+        LOG.info("Background dependency resolution completed for workspace {}", id);
+    }
+
+    private void awaitDependencyResolution() {
+        if (depResolutionFuture != null) {
+            depResolutionFuture.join();
         }
     }
 
@@ -446,6 +460,7 @@ public class WorkspaceContext {
 
     @SuppressWarnings("unchecked")
     private ProviderEvaluateResponse evaluateDependency(String conditionInfo) {
+        awaitDependencyResolution();
         Map<String, Object> cond = YAML.get().load(conditionInfo);
         Map<String, Object> depCond = (Map<String, Object>) cond.get("dependency");
 
@@ -560,6 +575,7 @@ public class WorkspaceContext {
     }
 
     public DependencyResponse getDependencies() {
+        awaitDependencyResolution();
         if (resolvedDeps != null && !resolvedDeps.isEmpty()) {
             return getDependenciesFromBuildTool();
         }
@@ -590,6 +606,7 @@ public class WorkspaceContext {
     }
 
     public DependencyDAGResponse getDependenciesDAG() {
+        awaitDependencyResolution();
         if (resolvedDag == null || resolvedDag.isEmpty()) {
             return DependencyDAGResponse.newBuilder()
                     .setSuccessful(true)
@@ -713,10 +730,12 @@ public class WorkspaceContext {
     }
 
     public BuildTool getBuildTool() {
+        awaitDependencyResolution();
         return buildTool;
     }
 
     public List<BuildTool.ResolvedDependency> getResolvedDeps() {
+        awaitDependencyResolution();
         return resolvedDeps != null ? resolvedDeps : List.of();
     }
 }
