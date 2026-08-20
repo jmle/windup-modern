@@ -15,6 +15,7 @@ import org.eclipse.aether.graph.DependencyNode;
 import org.eclipse.aether.impl.DefaultServiceLocator;
 import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.spi.connector.RepositoryConnectorFactory;
 import org.eclipse.aether.spi.connector.transport.TransporterFactory;
 import org.eclipse.aether.transport.http.HttpTransporterFactory;
@@ -172,6 +173,8 @@ public class MavenBuildTool implements BuildTool {
             }
         }
 
+        downloadBomPoms(model, parentModel, repoSystem, session, remoteRepos);
+
         CollectRequest collectRequest = new CollectRequest();
         collectRequest.setRepositories(remoteRepos);
 
@@ -183,7 +186,12 @@ public class MavenBuildTool implements BuildTool {
             if (version == null && parentModel != null) {
                 version = findManagedVersion(parentModel, modelDep.getGroupId(), modelDep.getArtifactId());
             }
-            version = resolveProperties(version != null ? version : "[0,)", properties);
+            if (version == null) {
+                LOG.warn("No version found for {}:{} (likely from an unresolved BOM import), skipping from transitive resolution",
+                        modelDep.getGroupId(), modelDep.getArtifactId());
+                continue;
+            }
+            version = resolveProperties(version, properties);
 
             String groupId = resolveProperties(modelDep.getGroupId(), properties);
             String artifactId = resolveProperties(modelDep.getArtifactId(), properties);
@@ -247,12 +255,46 @@ public class MavenBuildTool implements BuildTool {
         return resolved;
     }
 
-    private String findManagedVersion(Model parentModel, String groupId, String artifactId) {
-        if (parentModel.getDependencyManagement() == null) return null;
-        for (org.apache.maven.model.Dependency managed : parentModel.getDependencyManagement().getDependencies()) {
+    private String findManagedVersion(Model model, String groupId, String artifactId) {
+        if (model.getDependencyManagement() == null) return null;
+        java.util.Properties properties = buildProperties(model, null);
+        for (org.apache.maven.model.Dependency managed : model.getDependencyManagement().getDependencies()) {
             if (groupId.equals(managed.getGroupId()) && artifactId.equals(managed.getArtifactId())) {
                 return managed.getVersion();
             }
+            if ("pom".equals(managed.getType()) && "import".equals(managed.getScope())) {
+                String bomVersion = findVersionInBom(managed, groupId, artifactId, properties);
+                if (bomVersion != null) return bomVersion;
+            }
+        }
+        return null;
+    }
+
+    private String findVersionInBom(org.apache.maven.model.Dependency bomDep,
+                                     String groupId, String artifactId,
+                                     java.util.Properties parentProperties) {
+        String bomGroupId = resolveProperties(bomDep.getGroupId(), parentProperties);
+        String bomArtifactId = resolveProperties(bomDep.getArtifactId(), parentProperties);
+        String bomVersion = resolveProperties(bomDep.getVersion(), parentProperties);
+        if (bomVersion == null) return null;
+
+        Path localRepo = getLocalRepoPath();
+        Path bomPom = resolveJarPath(localRepo, bomGroupId, bomArtifactId, bomVersion, null, "pom");
+        if (bomPom == null) return null;
+
+        try {
+            Model bomModel = parsePom(bomPom);
+            if (bomModel.getDependencyManagement() == null) return null;
+            java.util.Properties bomProps = buildProperties(bomModel, null);
+            for (org.apache.maven.model.Dependency managed : bomModel.getDependencyManagement().getDependencies()) {
+                String mGroupId = resolveProperties(managed.getGroupId(), bomProps);
+                String mArtifactId = resolveProperties(managed.getArtifactId(), bomProps);
+                if (groupId.equals(mGroupId) && artifactId.equals(mArtifactId)) {
+                    return resolveProperties(managed.getVersion(), bomProps);
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("Failed to parse BOM pom {}:{}:{}: {}", bomGroupId, bomArtifactId, bomVersion, e.getMessage());
         }
         return null;
     }
@@ -297,6 +339,36 @@ public class MavenBuildTool implements BuildTool {
                 indirect, pomPath, baseDep);
     }
 
+    private void downloadBomPoms(Model model, Model parentModel,
+                                  RepositorySystem repoSystem,
+                                  DefaultRepositorySystemSession session,
+                                  List<RemoteRepository> remoteRepos) {
+        List<Model> models = parentModel != null ? List.of(model, parentModel) : List.of(model);
+        for (Model m : models) {
+            if (m.getDependencyManagement() == null) continue;
+            java.util.Properties properties = buildProperties(m, parentModel);
+            for (org.apache.maven.model.Dependency managed : m.getDependencyManagement().getDependencies()) {
+                if (!"pom".equals(managed.getType()) || !"import".equals(managed.getScope())) continue;
+                String bomGroupId = resolveProperties(managed.getGroupId(), properties);
+                String bomArtifactId = resolveProperties(managed.getArtifactId(), properties);
+                String bomVersion = resolveProperties(managed.getVersion(), properties);
+                if (bomVersion == null) continue;
+
+                Path existing = resolveJarPath(getLocalRepoPath(), bomGroupId, bomArtifactId, bomVersion, null, "pom");
+                if (existing != null) continue;
+
+                try {
+                    Artifact bomArtifact = new DefaultArtifact(bomGroupId, bomArtifactId, "pom", bomVersion);
+                    ArtifactRequest request = new ArtifactRequest(bomArtifact, remoteRepos, null);
+                    repoSystem.resolveArtifact(session, request);
+                    LOG.info("Downloaded BOM pom {}:{}:{}", bomGroupId, bomArtifactId, bomVersion);
+                } catch (Exception e) {
+                    LOG.warn("Failed to download BOM pom {}:{}:{}: {}", bomGroupId, bomArtifactId, bomVersion, e.getMessage());
+                }
+            }
+        }
+    }
+
     private Model parsePom(Path pomFile) throws Exception {
         MavenXpp3Reader reader = new MavenXpp3Reader();
         try (var fr = new FileReader(pomFile.toFile())) {
@@ -317,6 +389,8 @@ public class MavenBuildTool implements BuildTool {
         DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
         LocalRepository localRepo = new LocalRepository(getLocalRepoPath().toFile());
         session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
+        session.setConfigProperty("aether.connector.connectTimeout", 10_000);
+        session.setConfigProperty("aether.connector.requestTimeout", 30_000);
         return session;
     }
 
