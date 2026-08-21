@@ -58,7 +58,11 @@ public class MavenShaIndex {
 
                 raf.seek(mid);
                 if (mid > 0) {
-                    raf.readLine();
+                    raf.seek(mid - 1);
+                    int prevByte = raf.read();
+                    if (prevByte != '\n') {
+                        raf.readLine();
+                    }
                 }
 
                 long lineStart = raf.getFilePointer();
