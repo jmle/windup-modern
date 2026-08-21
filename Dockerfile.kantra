@@ -9,6 +9,24 @@ RUN mvn dependency:go-offline -q || true
 COPY src/ src/
 RUN mvn package -DskipTests -q
 
+FROM registry.access.redhat.com/ubi9/ubi AS index-download
+RUN dnf install -y wget unzip --setopt=install_weak_deps=False && dnf clean all
+WORKDIR /maven-index-data
+RUN set -e; \
+    URL=$(wget -qO- https://api.github.com/repos/konveyor/maven-search-index/releases/latest \
+      | grep '"browser_download_url".*maven-index-data.*\.zip' \
+      | sed -E 's/.*"browser_download_url": "([^"]+)".*/\1/' \
+      || true); \
+    if [ -z "$URL" ]; then \
+      echo "Falling back to direct download"; \
+      URL=https://github.com/konveyor/maven-search-index/releases/download/v2025-11-11/maven-index-data-v20251112021242.zip; \
+    fi; \
+    wget -q "$URL" -O maven-index-data.zip && \
+    unzip maven-index-data.zip && \
+    rm maven-index-data.zip
+RUN wget -q https://raw.githubusercontent.com/konveyor/java-analyzer-bundle/main/hack/maven.default.index \
+    -O /maven-index-data/maven.default.index
+
 FROM registry.access.redhat.com/ubi9/ubi-minimal AS runtime
 
 RUN microdnf install -y java-21-openjdk-headless java-1.8.0-openjdk-headless tar gzip --nodocs \
@@ -34,9 +52,11 @@ RUN printf '#!/bin/sh\nexec java -XX:+UseZGC -XX:+ZGenerational -jar /usr/local/
 RUN mkdir -p /jdtls/bin && \
     touch /jdtls/bin/jdtls && \
     mkdir -p /jdtls/java-analyzer-bundle/java-analyzer-bundle.core/target && \
-    touch /jdtls/java-analyzer-bundle/java-analyzer-bundle.core/target/java-analyzer-bundle.core-1.0.0-SNAPSHOT.jar && \
-    mkdir -p /usr/local/etc && \
-    touch /usr/local/etc/maven.default.index
+    touch /jdtls/java-analyzer-bundle/java-analyzer-bundle.core/target/java-analyzer-bundle.core-1.0.0-SNAPSHOT.jar
+
+# Maven SHA-1 index for binary artifact identification and open-source dependency labels
+COPY --from=index-download /maven-index-data/central.archive-metadata.txt /usr/local/etc/maven-index.txt
+COPY --from=index-download /maven-index-data/maven.default.index /usr/local/etc/maven.default.index
 
 RUN chgrp -R 0 /addon && chmod -R g=u /addon
 USER 1001
