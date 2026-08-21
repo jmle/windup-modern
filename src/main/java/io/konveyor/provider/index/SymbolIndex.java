@@ -81,9 +81,23 @@ public class SymbolIndex {
         LOG.info("Indexed {} total symbols (including dependencies)", allSymbols.size());
     }
 
+    private static final Set<String> EXCLUDED_DIRS = Set.of(
+            ".mvn", ".git", ".gradle", ".settings", ".idea", ".vscode",
+            "node_modules", "target", "build", "dist", ".venv", "venv", "vendor"
+    );
+
     private List<Path> collectJavaFiles(Path root, List<String> includedPaths) throws IOException {
         List<Path> javaFiles = new ArrayList<>();
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                String dirName = dir.getFileName().toString();
+                if (!dir.equals(root) && EXCLUDED_DIRS.contains(dirName)) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                 if (file.toString().endsWith(".java")) {
