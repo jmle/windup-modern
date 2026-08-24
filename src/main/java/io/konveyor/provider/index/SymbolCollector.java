@@ -161,6 +161,7 @@ public class SymbolCollector extends ASTVisitor {
 
         List<IndexedSymbol.AnnotationInfo> annots = collectAnnotations(node);
         addSymbol(fqn, simpleName, SymbolKind.ENUM, LocationType.CLASS, node.getName(), annots);
+        addSymbol(fqn, simpleName, SymbolKind.ENUM, LocationType.ENUM, node.getName(), annots);
 
         @SuppressWarnings("unchecked")
         List<Type> superInterfaces = node.superInterfaceTypes();
@@ -170,6 +171,22 @@ public class SymbolCollector extends ASTVisitor {
             }
         }
 
+        return true;
+    }
+
+    @Override
+    public boolean visit(EnumConstantDeclaration node) {
+        String constantName = node.getName().getIdentifier();
+        ASTNode parent = node.getParent();
+        String enumFqn;
+        if (parent instanceof EnumDeclaration ed) {
+            String enumSimple = ed.getName().getIdentifier();
+            enumFqn = packageName.isEmpty() ? enumSimple : packageName + "." + enumSimple;
+        } else {
+            enumFqn = packageName;
+        }
+        String fqn = enumFqn + "." + constantName;
+        addSymbol(fqn, constantName, SymbolKind.ENUM, LocationType.ENUM, node.getName());
         return true;
     }
 
@@ -384,6 +401,37 @@ public class SymbolCollector extends ASTVisitor {
             return result;
         }
         return List.of(buildAnnotationInfo(annotation));
+    }
+
+    // ------------------------------------------------------------------
+    // Qualified name expressions (enum constant / static field access)
+    // ------------------------------------------------------------------
+
+    @Override
+    public boolean visit(QualifiedName node) {
+        if (node.getParent() instanceof QualifiedName) return false;
+        if (isInTypeContext(node)) return false;
+
+        Name qualifier = node.getQualifier();
+        String qualifierStr = qualifier instanceof QualifiedName qn
+                ? qn.getFullyQualifiedName() : qualifier.toString();
+        String constantName = node.getName().getIdentifier();
+
+        for (String resolved : resolveTypeName(qualifierStr)) {
+            String fqn = resolved + "." + constantName;
+            addSymbol(fqn, constantName, SymbolKind.ENUM, LocationType.ENUM, node.getName());
+        }
+        return false;
+    }
+
+    private static boolean isInTypeContext(ASTNode node) {
+        ASTNode current = node.getParent();
+        while (current != null) {
+            if (current instanceof Type) return true;
+            if (current instanceof Statement || current instanceof BodyDeclaration) return false;
+            current = current.getParent();
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------

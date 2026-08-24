@@ -54,6 +54,16 @@ class SymbolIndexTest {
                 }
                 """);
 
+        Files.writeString(srcDir.resolve("Priority.java"), """
+                package com.example.apps;
+
+                public enum Priority {
+                    HIGH,
+                    MEDIUM,
+                    LOW
+                }
+                """);
+
         Files.writeString(srcDir.resolve("Service.java"), """
                 package com.example.apps;
 
@@ -64,6 +74,7 @@ class SymbolIndexTest {
 
                     @Autowired
                     private Bean myBean;
+                    private Priority priority = Priority.HIGH;
 
                     public void doStuff() {
                         String n = myBean.getName();
@@ -294,6 +305,56 @@ class SymbolIndexTest {
     void shouldStripTypeParametersInPatterns() {
         assertThat(SymbolIndex.stripTypeParameters("com.example.Foo<*>")).isEqualTo("com.example.Foo");
         assertThat(SymbolIndex.stripTypeParameters("com.example.Foo")).isEqualTo("com.example.Foo");
+    }
+
+    @Test
+    void shouldIndexEnumDeclarations() {
+        List<IndexedSymbol> enums = index.query("com.example.apps.Priority", LocationType.ENUM);
+        assertThat(enums).hasSize(1);
+        assertThat(enums.get(0).kind()).isEqualTo(SymbolKind.ENUM);
+        assertThat(enums.get(0).name()).isEqualTo("Priority");
+    }
+
+    @Test
+    void shouldIndexEnumConstants() {
+        List<IndexedSymbol> constants = index.query("com.example.apps.Priority.HIGH", LocationType.ENUM);
+        assertThat(constants).hasSizeGreaterThanOrEqualTo(1);
+        assertThat(constants).allMatch(s -> s.kind() == SymbolKind.ENUM);
+        assertThat(constants).allMatch(s -> s.name().equals("HIGH"));
+        boolean hasDecl = constants.stream().anyMatch(s -> s.fileUri().contains("Priority.java"));
+        assertThat(hasDecl).isTrue();
+    }
+
+    @Test
+    void shouldFindAllEnumConstantsWithWildcard() {
+        List<IndexedSymbol> all = index.query("com.example.apps.Priority.*", LocationType.ENUM);
+        assertThat(all).hasSizeGreaterThanOrEqualTo(3);
+        assertThat(all).extracting(IndexedSymbol::name).contains("HIGH", "MEDIUM", "LOW");
+    }
+
+    @Test
+    void shouldFindEnumTypeAndConstantsWithWildcard() {
+        List<IndexedSymbol> all = index.query("com.example.apps.Priority*", LocationType.ENUM);
+        assertThat(all).hasSizeGreaterThanOrEqualTo(4);
+        assertThat(all).extracting(IndexedSymbol::name)
+                .contains("Priority", "HIGH", "MEDIUM", "LOW");
+    }
+
+    @Test
+    void shouldFindEnumConstantReferences() {
+        List<IndexedSymbol> refs = index.query("com.example.apps.Priority.HIGH", LocationType.ENUM);
+        assertThat(refs).hasSizeGreaterThanOrEqualTo(2);
+        boolean hasDecl = refs.stream().anyMatch(s -> s.fileUri().contains("Priority.java"));
+        boolean hasUsage = refs.stream().anyMatch(s -> s.fileUri().contains("Service.java"));
+        assertThat(hasDecl).isTrue();
+        assertThat(hasUsage).isTrue();
+    }
+
+    @Test
+    void shouldIncludeEnumsInClassLocation() {
+        List<IndexedSymbol> classes = index.query("com.example.apps.Priority", LocationType.CLASS);
+        assertThat(classes).hasSize(1);
+        assertThat(classes.get(0).kind()).isEqualTo(SymbolKind.ENUM);
     }
 
     @Test

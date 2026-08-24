@@ -41,6 +41,7 @@ public class WorkspaceContext {
     private static final ThreadLocal<Yaml> YAML = ThreadLocal.withInitial(Yaml::new);
     private final SymbolIndex symbolIndex = new SymbolIndex();
     private final List<String> includedPaths;
+    private static final Path DEFAULT_MAVEN_INDEX_PATH = Path.of("/usr/local/etc/maven-index.txt");
     private final DependencyLabeler labeler;
     private BuildTool buildTool;
     private List<BuildTool.ResolvedDependency> resolvedDeps;
@@ -107,11 +108,27 @@ public class WorkspaceContext {
         }
     }
 
+    private Path resolveMavenIndexPath() {
+        String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
+        if (mavenIndexPathStr != null) {
+            Path configPath = Path.of(mavenIndexPathStr);
+            if (Files.exists(configPath)) return configPath;
+        }
+        if (Files.exists(DEFAULT_MAVEN_INDEX_PATH)) return DEFAULT_MAVEN_INDEX_PATH;
+        Path cwdIndex = Path.of("maven-index.txt").toAbsolutePath();
+        if (Files.exists(cwdIndex)) return cwdIndex;
+        try {
+            Path jarDir = Path.of(WorkspaceContext.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI()).getParent();
+            Path jarSibling = jarDir.resolve("maven-index.txt");
+            if (Files.exists(jarSibling)) return jarSibling;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     private void resolveDependenciesBackground(Path root) {
         LOG.info("Starting background dependency resolution for workspace {}", id);
-        String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
-        Path mavenIndexPath = mavenIndexPathStr != null ? Path.of(mavenIndexPathStr) : null;
-        buildTool = BuildToolDetector.detect(root, mavenIndexPath);
+        buildTool = BuildToolDetector.detect(root, resolveMavenIndexPath());
         try {
             Path buildFile = detectBuildFile(root);
             DependencyCache cache = buildFile != null ? new DependencyCache(buildFile) : null;
@@ -161,7 +178,15 @@ public class WorkspaceContext {
     }
 
     private void indexArchive(Path archivePath) throws IOException {
-        archiveProjectDir = archivePath.getParent().resolve("java-project");
+        Path parentDir = archivePath.getParent();
+        try {
+            Path testFile = parentDir.resolve(".write-test-" + id);
+            Files.writeString(testFile, "");
+            Files.delete(testFile);
+            archiveProjectDir = parentDir.resolve("java-project");
+        } catch (IOException e) {
+            archiveProjectDir = Files.createTempDirectory("java-project-");
+        }
         Files.createDirectories(archiveProjectDir);
 
         var decompiler = new io.konveyor.provider.decompiler.VineflowerDecompiler();
@@ -176,9 +201,7 @@ public class WorkspaceContext {
 
         List<Path> depJars = result.dependencyJars();
         if (!depJars.isEmpty()) {
-            String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
-            Path mavenIndexPath = mavenIndexPathStr != null ? Path.of(mavenIndexPathStr) : null;
-            buildTool = new BinaryBuildTool(mavenIndexPath);
+            buildTool = new BinaryBuildTool(resolveMavenIndexPath());
 
             resolvedDeps = new ArrayList<>();
             for (Path jar : depJars) {
