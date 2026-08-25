@@ -355,10 +355,16 @@ public class WorkspaceContext {
         List<IndexedSymbol> matches;
         if ((location == LocationType.METHOD) && pattern.contains(" ")) {
             matches = queryMethodWithReturnType(pattern);
-        } else if (annotatedPattern != null || annotatedElements != null) {
-            matches = queryAnnotated(pattern, location, annotatedPattern, annotatedElements);
         } else {
             matches = symbolIndex.query(pattern, location);
+        }
+
+        if (annotatedPattern != null || annotatedElements != null) {
+            String annPat = annotatedPattern;
+            Map<String, String> annElems = annotatedElements;
+            matches = matches.stream()
+                    .filter(sym -> symbolIndex.hasMatchingAnnotation(sym, annPat, annElems))
+                    .toList();
         }
 
         if (matches.isEmpty()) {
@@ -396,6 +402,12 @@ public class WorkspaceContext {
         if (matches.isEmpty()) {
             return ProviderEvaluateResponse.newBuilder().setMatched(false).build();
         }
+
+        // Deduplicate by file + line (e.g. method signature variants produce multiple symbols)
+        Set<String> seen = new HashSet<>();
+        matches = matches.stream()
+                .filter(s -> seen.add(s.fileUri() + ":" + s.line()))
+                .toList();
 
         // Build incidents
         ProviderEvaluateResponse.Builder response = ProviderEvaluateResponse.newBuilder()
@@ -466,19 +478,6 @@ public class WorkspaceContext {
         }
         result.removeIf(String::isEmpty);
         return result.isEmpty() ? null : result;
-    }
-
-    private List<IndexedSymbol> queryAnnotated(String pattern, LocationType location,
-                                                String annotatedPattern,
-                                                Map<String, String> annotatedElements) {
-        List<IndexedSymbol> baseMatches = symbolIndex.query(pattern, location);
-        List<IndexedSymbol> result = new ArrayList<>();
-        for (IndexedSymbol sym : baseMatches) {
-            if (symbolIndex.hasMatchingAnnotation(sym, annotatedPattern, annotatedElements)) {
-                result.add(sym);
-            }
-        }
-        return result;
     }
 
     @SuppressWarnings("unchecked")

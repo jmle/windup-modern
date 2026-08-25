@@ -10,6 +10,7 @@ import io.konveyor.provider.index.LocationType;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class ProviderRepl {
@@ -112,13 +113,37 @@ public class ProviderRepl {
     private static void handleReferencedQuery(WorkspaceContext ctx, String input) {
         String pattern;
         String locationStr = "";
+        String annotatedPattern = null;
+        Map<String, String> annotatedElements = new LinkedHashMap<>();
 
-        int atIdx = input.lastIndexOf('@');
+        // Parse "annotated:" and "element:" suffixes first
+        String remaining = input;
+        while (true) {
+            int elemIdx = remaining.lastIndexOf(" element:");
+            if (elemIdx > 0) {
+                String elemPart = remaining.substring(elemIdx + 9).trim();
+                remaining = remaining.substring(0, elemIdx).trim();
+                int eq = elemPart.indexOf('=');
+                if (eq > 0) {
+                    annotatedElements.put(elemPart.substring(0, eq), elemPart.substring(eq + 1));
+                }
+                continue;
+            }
+            int annIdx = remaining.lastIndexOf(" annotated:");
+            if (annIdx > 0) {
+                annotatedPattern = remaining.substring(annIdx + 11).trim();
+                remaining = remaining.substring(0, annIdx).trim();
+                continue;
+            }
+            break;
+        }
+
+        int atIdx = remaining.lastIndexOf('@');
         if (atIdx > 0) {
-            pattern = input.substring(0, atIdx).trim();
-            locationStr = input.substring(atIdx + 1).trim();
+            pattern = remaining.substring(0, atIdx).trim();
+            locationStr = remaining.substring(atIdx + 1).trim();
         } else {
-            pattern = input.trim();
+            pattern = remaining.trim();
         }
 
         StringBuilder yaml = new StringBuilder();
@@ -126,6 +151,19 @@ public class ProviderRepl {
         yaml.append("  pattern: \"").append(escapeYaml(pattern)).append("\"\n");
         if (!locationStr.isEmpty()) {
             yaml.append("  location: ").append(locationStr.toLowerCase()).append("\n");
+        }
+        if (annotatedPattern != null || !annotatedElements.isEmpty()) {
+            yaml.append("  annotated:\n");
+            if (annotatedPattern != null) {
+                yaml.append("    pattern: \"").append(escapeYaml(annotatedPattern)).append("\"\n");
+            }
+            if (!annotatedElements.isEmpty()) {
+                yaml.append("    elements:\n");
+                for (var entry : annotatedElements.entrySet()) {
+                    yaml.append("      - name: \"").append(escapeYaml(entry.getKey())).append("\"\n");
+                    yaml.append("        value: \"").append(escapeYaml(entry.getValue())).append("\"\n");
+                }
+            }
         }
 
         ProviderEvaluateResponse resp = ctx.evaluate("referenced", yaml.toString());
@@ -230,6 +268,8 @@ public class ProviderRepl {
         System.out.println("Commands:");
         System.out.println("  <pattern>                     Search with default location");
         System.out.println("  <pattern>@<location>          Search with specific location");
+        System.out.println("  ... annotated:<annot-pattern>  Filter by annotation");
+        System.out.println("  ... element:<name>=<value>     Filter by annotation element");
         System.out.println("  dep:<name>                    Dependency query (exact name)");
         System.out.println("  dep:<regex>                   Dependency query (regex if contains *|()" + ")");
         System.out.println("  dep:<name> lower:<v> upper:<v>  Dependency with version bounds");
@@ -242,6 +282,8 @@ public class ProviderRepl {
         System.out.println("  javax.persistence*@import");
         System.out.println("  org.springframework.context.annotation.Configuration@annotation");
         System.out.println("  javax.servlet.http.HttpServlet@inheritance");
+        System.out.println("  *@method annotated:org.springframework.context.annotation.Bean");
+        System.out.println("  *@class annotated:javax.ejb.Singleton");
         System.out.println("  dep:org.springframework.spring-beans");
         System.out.println("  dep:org.springframework.* lower:3.0");
     }

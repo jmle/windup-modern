@@ -18,6 +18,7 @@ public class SymbolCollector extends ASTVisitor {
     private final Map<String, String> importMap = new HashMap<>();
     private final List<String> starImportPackages = new ArrayList<>();
     private final Map<String, List<String>> fieldTypes = new HashMap<>();
+    private final Deque<Map<String, List<String>>> fieldTypeStack = new ArrayDeque<>();
     private Map<String, List<String>> localVarTypes = new HashMap<>();
     private String packageName = "";
 
@@ -109,6 +110,7 @@ public class SymbolCollector extends ASTVisitor {
     @Override
     @SuppressWarnings("unchecked")
     public boolean visit(TypeDeclaration node) {
+        Map<String, List<String>> savedFieldTypes = new HashMap<>(fieldTypes);
         fieldTypes.clear();
         for (FieldDeclaration field : node.getFields()) {
             String typeStr = typeToString(field.getType());
@@ -117,6 +119,7 @@ public class SymbolCollector extends ASTVisitor {
                 fieldTypes.put(frag.getName().getIdentifier(), resolved);
             }
         }
+        fieldTypeStack.push(savedFieldTypes);
 
         String simpleName = node.getName().getIdentifier();
         String fqn = buildQualifiedName(node);
@@ -148,6 +151,14 @@ public class SymbolCollector extends ASTVisitor {
         }
 
         return true;
+    }
+
+    @Override
+    public void endVisit(TypeDeclaration node) {
+        if (!fieldTypeStack.isEmpty()) {
+            fieldTypes.clear();
+            fieldTypes.putAll(fieldTypeStack.pop());
+        }
     }
 
     // ------------------------------------------------------------------
@@ -223,10 +234,7 @@ public class SymbolCollector extends ASTVisitor {
         if (!node.isConstructor() && node.getReturnType2() != null) {
             String returnTypeStr = typeToString(node.getReturnType2());
             for (String resolved : resolveTypeName(returnTypeStr)) {
-                // For METHOD with "* ReturnType" pattern: the method's FQN is matchable
-                // as "methodName returnType" so store both the return type as qualifier
-                // and the method name as the symbol name
-                addSymbol(resolved, methodName, SymbolKind.METHOD, LocationType.RETURN_TYPE, node.getReturnType2());
+                addSymbol(resolved, methodName, SymbolKind.METHOD, LocationType.RETURN_TYPE, node.getReturnType2(), annots);
             }
         }
 

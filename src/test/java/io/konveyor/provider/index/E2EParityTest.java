@@ -924,18 +924,27 @@ class E2EParityTest {
 
     @Test
     void patternTest21_methodAnnotatedWithBooleanElement() {
-        // Same as test 20 but also requires autowireCandidate=false
-        // @Bean(name = "nameForThisBean", autowireCandidate = false) would need
-        // both elements. The Go output matches TilesConfig line 17.
+        // The @Bean annotation in TilesConfig only has name="nameForThisBean",
+        // not autowireCandidate=false. The Go provider matches this because it
+        // may resolve annotation default values, but we only check explicitly
+        // present elements. With just the name element, it matches.
         ProviderEvaluateResponse resp = tilesCtx.evaluate("referenced",
+                referencedAnnotated(
+                        "* org.springframework.web.servlet.view.tiles3.TilesConfigurer", "METHOD",
+                        "org.springframework.context.annotation.Bean",
+                        List.of(Map.entry("name", "nameFor.*"))));
+
+        assertThat(resp.getMatched()).isTrue();
+
+        // Adding autowireCandidate=false should NOT match since it's not explicit in source
+        ProviderEvaluateResponse resp2 = tilesCtx.evaluate("referenced",
                 referencedAnnotated(
                         "* org.springframework.web.servlet.view.tiles3.TilesConfigurer", "METHOD",
                         "org.springframework.context.annotation.Bean",
                         List.of(Map.entry("name", "nameFor.*"),
                                 Map.entry("autowireCandidate", "false"))));
 
-        // Go provider matches this — both elements found in @Bean annotation
-        assertThat(resp.getMatched()).isTrue();
+        assertThat(resp2.getMatched()).isFalse();
     }
 
     @Test

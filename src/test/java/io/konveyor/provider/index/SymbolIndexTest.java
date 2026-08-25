@@ -76,6 +76,10 @@ class SymbolIndexTest {
                     private Bean myBean;
                     private Priority priority = Priority.HIGH;
 
+                    static class Helper {
+                        public void assist() {}
+                    }
+
                     public void doStuff() {
                         String n = myBean.getName();
                     }
