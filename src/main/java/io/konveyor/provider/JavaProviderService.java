@@ -82,10 +82,20 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
             ctx.index();
             workspaces.put(id, ctx);
 
-            InitResponse response = InitResponse.newBuilder()
+            InitResponse.Builder responseBuilder = InitResponse.newBuilder()
                     .setSuccessful(true)
-                    .setId(id)
+                    .setId(id);
+
+            String builtinLocation = ctx.getBuiltinLocation();
+            Config builtinConfig = Config.newBuilder()
+                    .setLocation(builtinLocation)
+                    .setDependencyPath(request.getDependencyPath())
+                    .setAnalysisMode(analysisMode)
                     .build();
+            responseBuilder.setBuiltinConfig(builtinConfig);
+            LOG.info("Returning builtinConfig location={}", builtinLocation);
+
+            InitResponse response = responseBuilder.build();
             responseObserver.onNext(response);
         } catch (Exception e) {
             LOG.error("Init failed for location={}", location, e);

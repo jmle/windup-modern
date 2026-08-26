@@ -89,6 +89,13 @@ public class WorkspaceContext {
                 .toList();
     }
 
+    public String getBuiltinLocation() {
+        if (archiveProjectDir != null) {
+            return archiveProjectDir.toString();
+        }
+        return location;
+    }
+
     public void index() throws IOException {
         Path root = Path.of(location);
 
