@@ -394,11 +394,6 @@ public class WorkspaceContext {
                     .toList();
         }
 
-        // Exclude matches from dependency source files — only application source should produce incidents
-        matches = matches.stream()
-                .filter(s -> !symbolIndex.isDependencyFile(s.fileUri()))
-                .toList();
-
         if (matches.isEmpty()) {
             return ProviderEvaluateResponse.newBuilder().setMatched(false).build();
         }
