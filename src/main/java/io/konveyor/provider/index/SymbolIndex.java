@@ -194,29 +194,6 @@ public class SymbolIndex {
         }
     }
 
-    /**
-     * Indexes a single file. Used by tests; production code uses
-     * {@link #parseFilesParallel} for batch processing.
-     */
-    public void indexFile(Path file) throws IOException {
-        String source = Files.readString(file);
-        String fileUri = file.toUri().toString();
-
-        ASTParser parser = ASTParser.newParser(AST.JLS17);
-        parser.setKind(ASTParser.K_COMPILATION_UNIT);
-        parser.setSource(source.toCharArray());
-        parser.setCompilerOptions(COMPILER_OPTIONS);
-        parser.setResolveBindings(false);
-
-        CompilationUnit cu = (CompilationUnit) parser.createAST(null);
-
-        SymbolCollector collector = new SymbolCollector(cu, fileUri);
-        cu.accept(collector);
-
-        List<IndexedSymbol> fileSymbols = collector.getSymbols();
-        mergeSymbols(fileSymbols);
-    }
-
     public boolean isDependencyFile(String fileUri) {
         return dependencyFileUris.contains(fileUri);
     }
@@ -298,6 +275,11 @@ public class SymbolIndex {
                 || location == LocationType.CLASS;
     }
 
+    /**
+     * TODO: we should not be querying imports as packages, this is tech-debt from the
+     *       go java provider to pass koncur tests. Instead, PACKAGE location should match package usage,
+     *       and IMPORT should match imports.
+     */
     private List<IndexedSymbol> queryPackage(String pattern) {
         Pattern regex = globToRegex(pattern);
         List<IndexedSymbol> matches = new ArrayList<>();

@@ -8,6 +8,8 @@ import io.konveyor.provider.buildtool.BuildToolDetector;
 import io.konveyor.provider.buildtool.DependencyCache;
 import io.konveyor.provider.buildtool.DependencyLabeler;
 import io.konveyor.provider.buildtool.DependencyResolver;
+import io.konveyor.provider.decompiler.ArchiveHandler;
+import io.konveyor.provider.decompiler.VineflowerDecompiler;
 import io.konveyor.provider.grpc.*;
 import io.konveyor.provider.index.*;
 import org.slf4j.Logger;
@@ -37,7 +39,6 @@ public class WorkspaceContext {
     private final String location;
     private final String analysisMode;
     private final Config config;
-    private final int contextLines;
     private static final ThreadLocal<Yaml> YAML = ThreadLocal.withInitial(Yaml::new);
     private final SymbolIndex symbolIndex = new SymbolIndex();
     private final List<String> includedPaths;
@@ -54,7 +55,6 @@ public class WorkspaceContext {
         this.location = location;
         this.analysisMode = analysisMode;
         this.config = config;
-        this.contextLines = contextLines;
         this.includedPaths = extractIncludedPaths(config);
         this.labeler = createLabeler(config);
     }
@@ -196,8 +196,8 @@ public class WorkspaceContext {
         }
         Files.createDirectories(archiveProjectDir);
 
-        var decompiler = new io.konveyor.provider.decompiler.VineflowerDecompiler();
-        var handler = new io.konveyor.provider.decompiler.ArchiveHandler(decompiler);
+        var decompiler = new VineflowerDecompiler();
+        var handler = new ArchiveHandler(decompiler);
         var result = handler.handleArchive(archivePath, archiveProjectDir);
 
         for (Path sourceDir : result.sourceDirs()) {
