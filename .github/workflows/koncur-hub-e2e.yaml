@@ -1,0 +1,133 @@
+name: Koncur Hub E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  koncur-hub-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build fat JAR
+        run: mvn package -DskipTests -q
+
+      - name: Build Java provider image
+        run: podman build -f Dockerfile.kantra -t localhost/java-provider:test .
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Clone and build koncur
+        run: |
+          git clone --depth 1 --branch koncur-new-java-provider https://github.com/konveyor/koncur.git /tmp/koncur
+          cd /tmp/koncur
+          go build -o $HOME/.local/bin/koncur ./cmd/koncur/main.go
+          mkdir -p $HOME/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.25.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Create Kind cluster and install Tackle Hub
+        working-directory: /tmp/koncur
+        run: |
+          make kind-create
+          make hub-install
+
+      - name: Wait for Hub readiness
+        run: |
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=tackle-hub \
+            -n konveyor-tackle --timeout=300s
+
+      - name: Load Java provider image into Kind
+        run: |
+          podman save localhost/java-provider:test -o /tmp/java-provider.tar
+          kind load image-archive /tmp/java-provider.tar --name koncur-test
+          rm /tmp/java-provider.tar
+
+      - name: Start port-forward
+        run: |
+          kubectl port-forward -n konveyor-tackle svc/tackle-hub 8081:8080 &
+          sleep 5
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8081/applications > /dev/null 2>&1; then
+              echo "Hub API is ready"
+              exit 0
+            fi
+            echo "Waiting for Hub API... attempt $i"
+            sleep 5
+          done
+          echo "Hub API never became ready"
+          exit 1
+
+      - name: Create tackle-hub target config
+        run: |
+          mkdir -p /tmp/koncur/.koncur/config
+          cat > /tmp/koncur/.koncur/config/target-tackle-hub.yaml << 'EOF'
+          type: tackle-hub
+          tackleHub:
+            url: http://localhost:8081
+            images:
+              javaProvider: localhost/java-provider:test
+          EOF
+
+      - name: Run koncur tests
+        working-directory: /tmp/koncur
+        env:
+          SKIP_MAVEN: "true"
+        run: koncur run tests -t tackle-hub --target-config .koncur/config/target-tackle-hub.yaml -o yaml --output-file results-hub.yaml
+
+      - name: Show Hub status on failure
+        if: failure()
+        run: |
+          echo "=== Pod Status ==="
+          kubectl get pods -n konveyor-tackle
+          echo ""
+          echo "=== Hub Logs ==="
+          kubectl logs -n konveyor-tackle -l app.kubernetes.io/name=tackle-hub --tail=100 || true
+          echo ""
+          echo "=== Analyzer Pods ==="
+          kubectl get pods -n konveyor-tackle -l app.kubernetes.io/name=tackle2-addon-analyzer --show-labels || true
+          echo ""
+          echo "=== Java Provider Pods ==="
+          kubectl logs -n konveyor-tackle -l app.kubernetes.io/name=java-external-provider --tail=50 || true
+          echo ""
+          echo "=== Tackle CR ==="
+          kubectl get tackle -n konveyor-tackle -o yaml || true
+
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koncur-hub-output
+          path: /tmp/koncur/.koncur/output
+          retention-days: 5
+          include-hidden-files: true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koncur-hub-results
+          path: /tmp/koncur/results-hub.yaml
+          retention-days: 5
+
+      - name: Cleanup Kind cluster
+        if: always()
+        run: kind delete cluster --name koncur-test || true
