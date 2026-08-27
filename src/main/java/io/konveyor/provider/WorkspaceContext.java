@@ -282,7 +282,7 @@ public class WorkspaceContext {
         DependencyResolver resolver = new DependencyResolver();
 
         if (buildTool.getType() == BuildTool.Type.MAVEN) {
-            resolver.downloadSources(resolvedDeps, projectDir);
+            resolver.downloadSourceJars(resolvedDeps);
             resolvedDag = buildTool.getDependenciesDAG(projectDir);
             resolvedDeps = BuildTool.flattenDag(resolvedDag);
         }

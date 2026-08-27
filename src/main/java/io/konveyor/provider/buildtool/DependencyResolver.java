@@ -3,6 +3,19 @@ package io.konveyor.provider.buildtool;
 import io.konveyor.provider.decompiler.DecompileResult;
 import io.konveyor.provider.decompiler.DecompilerService;
 import io.konveyor.provider.decompiler.VineflowerDecompiler;
+import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
+import org.eclipse.aether.DefaultRepositorySystemSession;
+import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory;
+import org.eclipse.aether.impl.DefaultServiceLocator;
+import org.eclipse.aether.repository.LocalRepository;
+import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.ArtifactRequest;
+import org.eclipse.aether.resolution.ArtifactResult;
+import org.eclipse.aether.spi.connector.RepositoryConnectorFactory;
+import org.eclipse.aether.spi.connector.transport.TransporterFactory;
+import org.eclipse.aether.transport.http.HttpTransporterFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,13 +26,15 @@ import java.util.stream.Stream;
 
 /**
  * Obtains Java source for project dependencies so they can be indexed and analyzed.
- * For dependencies with source JARs, extracts {@code .java} files directly. For those
- * without, decompiles binary JARs via {@link VineflowerDecompiler}. Also supports
- * downloading source JARs through {@code mvn dependency:sources}.
+ * For each dependency, tries in order: existing source JAR on disk, download via
+ * Maven Resolver API, decompile binary JAR via {@link VineflowerDecompiler}.
  */
 public class DependencyResolver {
 
     private static final Logger LOG = LoggerFactory.getLogger(DependencyResolver.class);
+
+    private static final RemoteRepository MAVEN_CENTRAL = new RemoteRepository.Builder(
+            "central", "default", "https://repo.maven.apache.org/maven2/").build();
 
     private final DecompilerService decompiler;
 
@@ -43,20 +58,18 @@ public class DependencyResolver {
                 continue;
             }
 
-            if (dep.hasSourceJar()) {
-                Path sourceJar = dep.sourceJarPath();
-                if (sourceJar != null && Files.exists(sourceJar)) {
-                    Path extractDir = sourcesDir.resolve(dep.artifactId() + "-" + dep.version());
-                    try {
-                        extractSourceJar(sourceJar, extractDir);
-                        sourceDirs.add(extractDir);
-                        LOG.debug("Extracted sources for {}:{}", dep.groupId(), dep.artifactId());
-                    } catch (IOException e) {
-                        LOG.warn("Failed to extract source JAR {}, will decompile binary", sourceJar);
-                        jarsToDecompile.add(dep.jarPath());
-                    }
-                    continue;
+            Path sourceJar = dep.sourceJarPath();
+            if (sourceJar != null && Files.exists(sourceJar)) {
+                Path extractDir = sourcesDir.resolve(dep.artifactId() + "-" + dep.version());
+                try {
+                    extractSourceJar(sourceJar, extractDir);
+                    sourceDirs.add(extractDir);
+                    LOG.debug("Extracted sources for {}:{}", dep.groupId(), dep.artifactId());
+                } catch (IOException e) {
+                    LOG.warn("Failed to extract source JAR {}, will decompile binary", sourceJar);
+                    jarsToDecompile.add(dep.jarPath());
                 }
+                continue;
             }
 
             jarsToDecompile.add(dep.jarPath());
@@ -78,47 +91,48 @@ public class DependencyResolver {
         return new ResolveResult(sourceDirs, jarsToDecompile.size());
     }
 
-    public MavenDownloadResult downloadSources(List<BuildTool.ResolvedDependency> deps, Path projectDir) {
+    /**
+     * Downloads source JARs for dependencies that don't already have them,
+     * using the Maven Resolver API in-process (no external mvn binary needed).
+     */
+    public DownloadResult downloadSourceJars(List<BuildTool.ResolvedDependency> deps) {
         List<BuildTool.ResolvedDependency> missingSource = deps.stream()
-                .filter(d -> !d.hasSourceJar() && d.jarPath() != null)
+                .filter(d -> !d.hasSourceJar() && d.jarPath() != null && d.version() != null)
                 .toList();
 
         if (missingSource.isEmpty()) {
-            return new MavenDownloadResult(0, 0);
+            return new DownloadResult(0, 0);
         }
 
-        LOG.info("Attempting to download source JARs for {} dependencies", missingSource.size());
+        LOG.info("Downloading source JARs for {} dependencies via Maven Resolver API", missingSource.size());
 
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "mvn", "dependency:sources", "-q")
-                    .directory(projectDir.toFile())
-                    .redirectErrorStream(true);
+        RepositorySystem repoSystem = newRepositorySystem();
+        DefaultRepositorySystemSession session = newSession(repoSystem);
+        List<RemoteRepository> remoteRepos = List.of(MAVEN_CENTRAL);
 
-            Process process = pb.start();
-            process.getInputStream().readAllBytes();
-            boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.MINUTES);
-            if (!finished) {
-                process.destroyForcibly();
-                LOG.warn("mvn dependency:sources timed out");
-                return new MavenDownloadResult(0, missingSource.size());
-            }
+        int downloaded = 0;
+        int failed = 0;
 
-            int downloaded = 0;
-            for (BuildTool.ResolvedDependency dep : missingSource) {
-                Path sourceJar = dep.sourceJarPath();
-                if (sourceJar != null && Files.exists(sourceJar)) {
+        for (BuildTool.ResolvedDependency dep : missingSource) {
+            try {
+                DefaultArtifact sourceArtifact = new DefaultArtifact(
+                        dep.groupId(), dep.artifactId(), "sources", "jar", dep.version());
+                ArtifactRequest request = new ArtifactRequest(sourceArtifact, remoteRepos, null);
+                ArtifactResult result = repoSystem.resolveArtifact(session, request);
+                if (result.isResolved()) {
                     downloaded++;
+                    LOG.debug("Downloaded sources for {}:{}", dep.groupId(), dep.artifactId());
+                } else {
+                    failed++;
                 }
+            } catch (Exception e) {
+                failed++;
+                LOG.debug("No source JAR available for {}:{}:{}", dep.groupId(), dep.artifactId(), dep.version());
             }
-
-            LOG.info("Downloaded {} of {} source JARs", downloaded, missingSource.size());
-            return new MavenDownloadResult(downloaded, missingSource.size() - downloaded);
-        } catch (IOException | InterruptedException e) {
-            LOG.warn("Failed to download source JARs: {}", e.getMessage());
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            return new MavenDownloadResult(0, missingSource.size());
         }
+
+        LOG.info("Downloaded {}/{} source JARs ({} unavailable)", downloaded, missingSource.size(), failed);
+        return new DownloadResult(downloaded, failed);
     }
 
     private void extractSourceJar(Path sourceJar, Path targetDir) throws IOException {
@@ -142,7 +156,34 @@ public class DependencyResolver {
         }
     }
 
+    @SuppressWarnings("deprecation")
+    private RepositorySystem newRepositorySystem() {
+        DefaultServiceLocator locator = MavenRepositorySystemUtils.newServiceLocator();
+        locator.addService(RepositoryConnectorFactory.class, BasicRepositoryConnectorFactory.class);
+        locator.addService(TransporterFactory.class, HttpTransporterFactory.class);
+        return locator.getService(RepositorySystem.class);
+    }
+
+    @SuppressWarnings("deprecation")
+    private DefaultRepositorySystemSession newSession(RepositorySystem system) {
+        DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
+        Path localRepoPath = getLocalRepoPath();
+        LocalRepository localRepo = new LocalRepository(localRepoPath.toFile());
+        session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
+        session.setConfigProperty("aether.connector.connectTimeout", 10_000);
+        session.setConfigProperty("aether.connector.requestTimeout", 30_000);
+        return session;
+    }
+
+    private Path getLocalRepoPath() {
+        String m2Repo = System.getProperty("maven.repo.local");
+        if (m2Repo != null) {
+            return Path.of(m2Repo);
+        }
+        return Path.of(System.getProperty("user.home"), ".m2", "repository");
+    }
+
     public record ResolveResult(List<Path> sourceDirs, int decompiledCount) {}
 
-    public record MavenDownloadResult(int downloaded, int failed) {}
+    public record DownloadResult(int downloaded, int failed) {}
 }
