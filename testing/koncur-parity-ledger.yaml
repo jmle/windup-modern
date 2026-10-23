@@ -140,6 +140,36 @@ entries:
     summary: "koncur #131 — updated quarkus/springboot baselines for Quarkus 3.40 rules (MTA-8020)."
     status: needs-triage
 
+  # ── Observed in CI run 39956522958 (2026-10-23) ──────────────────────────────
+  # Root cause: golden pinned to stale forked SHA while analysis pulls rulesets :latest.
+  # These are RULE-CONTENT drift, not provider regressions — the incidents match on file+line,
+  # only message/links differ, and new rules appear. Fix: pin baseline.ruleset_ref AND/OR have the
+  # comparator ignore volatile fields (message/links). Affected tests: daytrader, book-server (deps+source).
+
+  - id: drift-quarkus-maven-tooling-message-and-link
+    tests: [daytrader, book-server-deps, book-server-source]
+    location: dependency
+    classification: benign
+    direction: java-different
+    summary: >
+      On pom.xml dependency incidents the provider matches the correct file+line, but koncur reports
+      "failed to match on: message" and a missing "Quarkus - Guide" maven-tooling link — the rule's
+      message/link text changed in :latest rulesets vs the pinned golden.
+    evidence: "CI run 39956522958 — file:///source/pom.xml:5 (+ daytrader-ee7 sub-poms)"
+    resolution: Pin ruleset_ref; have the comparator ignore message/links unless a test asserts them.
+    status: open
+
+  - id: delta-hibernate-orm7-to-quarkus-rules
+    tests: [daytrader]
+    classification: benign
+    direction: java-different
+    summary: >
+      New rules hibernate-orm7-to-quarkus-00010..00090 exist in :latest rulesets but not in the pinned
+      golden, so they surface as "unexpected unmatched rule." New-rule coverage, not a provider issue.
+    evidence: "CI run 39956522958 — Daytrader"
+    resolution: Pick up when the baseline is re-synced to current rules.
+    status: needs-triage
+
   - id: delta-new-openjdk-rules
     source_commit: ca8d5ad
     summary: "koncur #126 — tests changed for new OpenJDK rules."

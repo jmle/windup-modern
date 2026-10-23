@@ -9,6 +9,11 @@ jobs:
   koncur-e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # Advisory (non-blocking) until the ledger-driven differential re-sync lands (MTA-8153).
+    # The job is pinned to a stale golden baseline while analysis pulls rulesets :latest, so
+    # rule-content drift (changed messages/links, new rules) shows up as failures that are NOT
+    # provider regressions. It still runs and surfaces diffs in the logs.
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
