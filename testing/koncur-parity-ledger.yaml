@@ -1,0 +1,163 @@
+# Koncur Parity Ledger
+#
+# Durable record of every known divergence between the NATIVE JAVA provider and vanilla
+# koncur `main`'s Go-generated goldens (the Go provider's output of record). This replaces the
+# forked `koncur-new-java-provider` golden branch, which kept only edited goldens and lost the
+# reasoning. See TEST_PLAN.md (L4) for the model.
+#
+# The differential is a SINGLE run (new provider vs vanilla main); every divergence is TRIAGED,
+# never auto-failed. Re-syncing onto a newer koncur is a DELTA: entries that still apply are carried
+# forward; only new/changed divergences are triaged. CI fails on any `java-wrong` regression OR any
+# divergence not explained by an accepted ledger entry.
+#
+# classification:
+#   go-wrong    (a) Java correct, Go wrong          -> accept Java output; golden would change
+#   java-wrong  (b) Go correct, Java wrong          -> real regression / provider bug
+#   benign      (c) ordering/dedup/line/uri noise   -> handled by comparator normalization
+# status: accepted | fixed | fixed-pending-ci | open | needs-triage | excluded
+# direction: java-fewer | java-more | java-different
+
+version: 1
+
+# The Go system-of-record this ledger was triaged against, plus the prior-triage fork point.
+baseline:
+  koncur_go_ref: 5ce4fb0ffd4fab2a7e4474ac15b8c00368d763a5   # upstream/main @ 2026-10-20 (re-sync target)
+  prior_triage_merge_base: 70eee774c3180c27d8a296645de040fc64512bfc
+  forked_golden_branch_tip: 002c902ede9d3fe5f08ab96d0e5dacc7dc2112a9  # to retire (MTA-8152)
+  ruleset_ref: TODO            # pin analyzer-lsp / rulesets version used for the run
+  kantra_image: TODO           # pin to a digest, not :latest
+  java_provider_image: TODO    # tag/digest of the provider under test
+
+# Comparator normalization applied before diffing (see TEST_PLAN.md L4).
+comparator:
+  order_insensitive: true
+  sort_key: [ruleset, rule, uri, line]
+  dedup_key: [uri, line, rule]
+  uri_normalization: true           # normalize file:// + base-dir; map java-project/ -> logical source
+  line_tolerance:
+    application_source: 0
+    decompiled_or_dependency: 2     # decompiler line numbers drift
+  compare_fields: [ruleset, rule, uri, line]
+  ignore_fields: [effort, message]  # unless a test explicitly asserts them
+  ignore_empty_rulesets: true
+
+entries:
+  # ── Seeded from FAILING_TESTS.md ──────────────────────────────────────────────
+
+  - id: daytrader-ee-to-quarkus-00020-overmatch
+    test: daytrader
+    ruleset: ee-to-quarkus
+    rule: ee-to-quarkus-00020
+    location: annotation
+    classification: go-wrong
+    direction: java-fewer
+    summary: >
+      Go over-matches @MessageDriven onto unrelated EJB annotations at nearby lines
+      (@Resource, @Override, @TransactionAttribute); Java reports only real @MessageDriven usages.
+    incidents:
+      - uri_contains: TradeSLSBBean.java
+        name: Override
+        lines: [160, 217, 248, 262, 268, 302, 398, 413, 546]
+      - uri_contains: TradeSLSBBean.java
+        name: TransactionAttribute
+        lines: [646]
+      - uri_contains: [DTBroker3MDB.java, DTStreamer3MDB.java, TradeSLSBBean.java]
+        name: Resource
+    resolution: Accept Java output; 13 spurious Go incidents (49 -> 36 for the rule).
+    evidence: FAILING_TESTS.md#2-daytrader
+    status: accepted
+    first_seen: 2026-08-18
+
+  - id: seam-booking-source-only-annotation-misses
+    test: seam-booking
+    rulesets: [eap6/java-ee/seam, eap7/weblogic, eap8/eap7, hibernate, technology-usage]
+    location: annotation
+    classification: go-wrong
+    direction: java-more
+    summary: >
+      In source-only mode Go/JDTLS cannot confirm an annotation's type without library bytes, so it
+      misses real @Entity, @NamedQuery, Hibernate annotations and javax imports. Java resolves the FQN
+      from imports and matches correctly.
+    resolution: >
+      Accept Java output; 5 rulesets' goldens grow (seam violations/insights/tags added, new `hibernate`
+      ruleset). ~45 "errors" were Go misses.
+    evidence: FAILING_TESTS.md#4-seam-booking
+    status: accepted
+    first_seen: 2026-08-18
+
+  - id: acmeair-binary-project-structure
+    test: acmeair-webapp
+    classification: java-wrong
+    direction: java-fewer
+    summary: >
+      For binary (WAR) input, the provider decompiled into a hidden flat .java-provider-work/ dir the
+      engine couldn't discover, so discovery-rules / eap / jakarta / technology-usage produced nothing.
+    resolution: >
+      ArchiveHandler restructured to a Go-compatible Maven layout under java-project/ (src/main/java,
+      src/main/webapp, extracted/synthetic pom.xml); dep work dir moved outside the source tree.
+    evidence: FAILING_TESTS.md#1-acmeair-webapp
+    status: fixed
+
+  - id: tomcat-legacy-bom-transitive-deps
+    test: tomcat-legacy
+    classification: java-wrong
+    direction: java-fewer
+    summary: >
+      Transitive deps (Micrometer via spring-boot-starter-actuator, Spring DI via spring-data-jpa) are
+      missed: findManagedVersion can't resolve versions from BOM imports (scope=import,type=pom), Aether
+      collection fails, and the Maven fallback only returns direct deps.
+    resolution: Implement BOM-import resolution in findManagedVersion.
+    tracked_by: MTA-8155
+    evidence: FAILING_TESTS.md#5a
+    status: open
+
+  - id: tomcat-legacy-dep-pom-line-numbers
+    test: tomcat-legacy
+    classification: java-wrong
+    direction: java-different
+    summary: >
+      Dependency rules (mvc-01220, observability-0100, database-03000, embedded-framework-08400) report
+      incidents at pom.xml:0 instead of the expected lines (86, 96, 76, 91) when Aether fails and static
+      pom parsing is used.
+    resolution: Add groupId/artifactId/pomPath to static-parsing extras so getDependencyLocation resolves lines.
+    evidence: FAILING_TESTS.md#5b
+    status: fixed-pending-ci
+
+  - id: petclinic-startup-timeout
+    test: petclinic-hazelcast-with-custom-rules
+    classification: benign
+    summary: Provider container intermittently exceeds the engine's 8m startup timeout on CI runners.
+    resolution: CI infrastructure flake, not a provider bug; excluded from parity gating when it times out.
+    evidence: FAILING_TESTS.md#3-petclinic
+    status: excluded
+
+  # ── Untriaged deltas on koncur main since the prior triage (merge-base 70eee77 -> 5ce4fb0) ──
+  # These landed after the forked branch was cut, so they have NOT been run against the new provider yet.
+  # Re-sync must triage each of these.
+
+  - id: delta-quarkus-3.40-baselines
+    source_commit: 5ce4fb0
+    summary: "koncur #131 — updated quarkus/springboot baselines for Quarkus 3.40 rules (MTA-8020)."
+    status: needs-triage
+
+  - id: delta-new-openjdk-rules
+    source_commit: ca8d5ad
+    summary: "koncur #126 — tests changed for new OpenJDK rules."
+    status: needs-triage
+
+  - id: delta-tackle-testapp-labelselector
+    source_commit: cc2ba55
+    test: tackle-testapp-with-deps
+    summary: "koncur #128 — runs with a specific labelSelector now."
+    status: needs-triage
+
+  - id: delta-nerd-dinner-full
+    source_commit: 9b9fd3f
+    test: nerd-dinner-full
+    summary: "koncur #112 — new full-analysis test added (.NET; verify it's out of scope for the Java provider)."
+    status: needs-triage
+
+  - id: delta-update-test-results
+    source_commit: 50a348a
+    summary: "koncur #124 — 'Update test results' (verify which goldens moved)."
+    status: needs-triage

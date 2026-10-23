@@ -57,14 +57,44 @@ Don't compare deps to Go. Compare `GetDependencies` / `GetDependenciesDAG` again
 Also test: source-JAR download + decompilation fallback, open-source labeler, version bounds,
 offline/proxy/private-repo.
 
-### L4 — Differential E2E (koncur, both providers)
-Run **both** providers over the same corpus, same engine, **pinned** rules/versions, and **diff**.
-Triage every diff into:
-- **(a) Java correct, Go wrong** → update baseline + record rationale
-- **(b) Go correct, Java wrong** → real regression (the only true failures)
-- **(c) benign** (ordering, dedup, line±1) → normalize the comparator
-Output: a tracked **parity ledger** (formalize `MISSING_FEATURES.md` / `LOCATION_DIFFERENCES.md` /
-`FAILING_TESTS.md`). koncur supports image overrides (`javaProvider:` / `JAVA_PROVIDER_IMG`) for this.
+### L4 — Differential E2E (koncur, ledger-driven)
+We trust vanilla koncur `main`'s goldens as the **system of record for the Go provider's output**
+(no need to run the Go image live). So the differential is a **single run**: run the *new* provider
+against vanilla `main` and diff its output against the committed Go goldens.
+
+Important: "the Go baseline is the Go output of record" is **not** "the Go baseline is ground truth" —
+the whole premise is that Go is sometimes wrong. So every divergence is **triaged**, not auto-failed:
+- **(a) `go-wrong`** — Java correct, Go wrong → accept Java; justified golden change.
+- **(b) `java-wrong`** — Go correct, Java wrong → **real regression** (the only true failures).
+- **(c) `benign`** — ordering / dedup / line tolerance → normalized away by the comparator.
+
+**Don't re-triage the whole corpus each time.** Record every triaged divergence in a durable
+**parity ledger** (`testing/koncur-parity-ledger.yaml`) keyed by `(test, rule, incident)` with
+classification + rationale. The run then becomes a **delta** operation:
+
+```
+run new provider vs vanilla main → diff vs Go goldens → for each divergence:
+    explained by ledger & still applies? → carry forward (auto-explained)
+    new / changed?                       → human triages just this delta
+CI gate: fail if any (b) java-wrong regression OR any unexplained divergence.
+```
+
+The forked golden branch (`koncur-new-java-provider`) is the *output* of a past run of this process,
+but it persisted only the edited goldens and lost the reasoning — so it can't be re-synced cheaply and
+has gone stale vs `main`. Replace it with the ledger (seeded from `FAILING_TESTS.md` + the branch diff),
+then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVIDER_IMG`.
+
+**Comparator normalization** (so the diff is signal, not noise):
+- **Order-insensitive:** compare incidents as sets, sorted by `(ruleset, rule, uri, line)`.
+- **Dedup:** collapse incidents identical in `(uri, line, rule)` before comparing (the provider emits
+  method-signature variants; `evaluate` already dedups by `uri:line`).
+- **URI normalization:** normalize `file://` scheme and workspace/base-dir prefixes; map binary
+  `java-project/` paths to their logical source path (the acmeair issue).
+- **Line tolerance:** exact for application source; configurable ±N for **decompiled/dependency** URIs
+  (decompiler line numbers drift — cf. koncur's "Update line numbers for new decompiler" commit).
+- **Field scope:** compare on structural identity (`ruleset, rule, uri, line`); ignore volatile fields
+  (effort, rendered message) unless a test explicitly asserts them.
+- **Empty rulesets:** ignored (koncur already filters them).
 
 ### L5 — Non-functional / production-readiness
 - **Resource lifecycle & leaks:** `Stop` must remove the workspace *and* clean temp dirs
