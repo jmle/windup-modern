@@ -110,7 +110,10 @@ entries:
       Implemented recursive, parent-aware BOM-import resolution in MavenBuildTool
       (findVersionInBom now recurses into nested import BOMs + walks the BOM parent chain;
       downloadBomPoms fetches the full BOM/parent closure). Covered by offline unit tests in
-      MavenBuildToolTest. Still needs E2E validation against tomcat-legacy (private-repo caveat).
+      MavenBuildToolTest. Validated online against the real spring-boot-dependencies:3.3.4 BOM:
+      version-less spring-data-jpa resolves to 3.3.4 via the nested spring-data-bom import, and
+      micrometer-core:1.13.4 appears transitively — matching `mvn dependency:tree` exactly.
+      Still needs full E2E against tomcat-legacy itself (private Azure repo access/mirror required).
     tracked_by: MTA-8155
     evidence: FAILING_TESTS.md#5a
     status: fixed-pending-ci
