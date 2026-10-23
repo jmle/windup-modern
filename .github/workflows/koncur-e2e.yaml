@@ -52,8 +52,12 @@ jobs:
 
       - name: Clone and build koncur
         run: |
-          git clone --depth 1 --branch koncur-new-java-provider https://github.com/konveyor/koncur.git /tmp/koncur
+          # Interim: pinned to a fixed SHA on the new-provider golden branch for reproducibility.
+          # TODO(MTA-8153): replace with a differential run against koncur `main`
+          #   (run Go + Java providers, diff and triage) instead of a forked golden baseline.
+          git clone https://github.com/konveyor/koncur.git /tmp/koncur
           cd /tmp/koncur
+          git checkout 002c902ede9d3fe5f08ab96d0e5dacc7dc2112a9
           go build -o $HOME/.local/bin/koncur ./cmd/koncur/main.go
 
       - name: Create target config
