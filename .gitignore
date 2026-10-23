@@ -21,3 +21,8 @@ Thumbs.db
 
 # Provider work directory
 .java-provider-work/
+
+# Generated slide decks (regenerate from slides/*.md with marp — see slides/case-for-java-provider.md)
+slides/*.html
+slides/*.pdf
+slides/*.pptx
