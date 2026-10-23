@@ -106,10 +106,14 @@ entries:
       Transitive deps (Micrometer via spring-boot-starter-actuator, Spring DI via spring-data-jpa) are
       missed: findManagedVersion can't resolve versions from BOM imports (scope=import,type=pom), Aether
       collection fails, and the Maven fallback only returns direct deps.
-    resolution: Implement BOM-import resolution in findManagedVersion.
+    resolution: >
+      Implemented recursive, parent-aware BOM-import resolution in MavenBuildTool
+      (findVersionInBom now recurses into nested import BOMs + walks the BOM parent chain;
+      downloadBomPoms fetches the full BOM/parent closure). Covered by offline unit tests in
+      MavenBuildToolTest. Still needs E2E validation against tomcat-legacy (private-repo caveat).
     tracked_by: MTA-8155
     evidence: FAILING_TESTS.md#5a
-    status: open
+    status: fixed-pending-ci
 
   - id: tomcat-legacy-dep-pom-line-numbers
     test: tomcat-legacy

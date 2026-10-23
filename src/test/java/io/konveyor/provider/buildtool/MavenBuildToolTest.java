@@ -252,4 +252,150 @@ class MavenBuildToolTest {
         assertThat(tool.resolveProperties(null, props)).isNull();
         assertThat(tool.resolveProperties("plain", props)).isEqualTo("plain");
     }
+
+    // ── BOM-import version resolution (offline, via a synthetic local repo) ──
+
+    @org.junit.jupiter.api.AfterEach
+    void clearRepoProperty() {
+        System.clearProperty("maven.repo.local");
+    }
+
+    private void useLocalRepo(Path repo) {
+        System.setProperty("maven.repo.local", repo.toString());
+    }
+
+    private void writeRepoPom(Path repo, String g, String a, String v, String xml) throws Exception {
+        Path dir = repo;
+        for (String part : g.split("\\.")) dir = dir.resolve(part);
+        dir = dir.resolve(a).resolve(v);
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve(a + "-" + v + ".pom"), xml);
+    }
+
+    private org.apache.maven.model.Model projectImporting(String g, String a, String v) {
+        org.apache.maven.model.Model project = new org.apache.maven.model.Model();
+        org.apache.maven.model.DependencyManagement dm = new org.apache.maven.model.DependencyManagement();
+        org.apache.maven.model.Dependency imp = new org.apache.maven.model.Dependency();
+        imp.setGroupId(g);
+        imp.setArtifactId(a);
+        imp.setVersion(v);
+        imp.setType("pom");
+        imp.setScope("import");
+        dm.addDependency(imp);
+        project.setDependencyManagement(dm);
+        return project;
+    }
+
+    @Test
+    void findsVersionViaNestedImportBom() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        useLocalRepo(repo);
+
+        // outer BOM imports a nested BOM, which manages the target
+        writeRepoPom(repo, "com.example", "outer-bom", "1.0", """
+                <project><modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId><artifactId>outer-bom</artifactId>
+                  <version>1.0</version><packaging>pom</packaging>
+                  <dependencyManagement><dependencies>
+                    <dependency><groupId>com.example</groupId><artifactId>nested-bom</artifactId>
+                      <version>2.0</version><type>pom</type><scope>import</scope></dependency>
+                  </dependencies></dependencyManagement>
+                </project>
+                """);
+        writeRepoPom(repo, "com.example", "nested-bom", "2.0", """
+                <project><modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId><artifactId>nested-bom</artifactId>
+                  <version>2.0</version><packaging>pom</packaging>
+                  <dependencyManagement><dependencies>
+                    <dependency><groupId>com.example</groupId><artifactId>target-lib</artifactId>
+                      <version>9.9</version></dependency>
+                  </dependencies></dependencyManagement>
+                </project>
+                """);
+
+        String v = new MavenBuildTool().findManagedVersion(
+                projectImporting("com.example", "outer-bom", "1.0"), "com.example", "target-lib");
+        assertThat(v).isEqualTo("9.9");
+    }
+
+    @Test
+    void findsVersionViaBomParentChainAndProperty() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        useLocalRepo(repo);
+
+        // leaf BOM inherits a parent that manages the target via a property defined in the parent
+        writeRepoPom(repo, "com.example", "bom-parent", "1.0", """
+                <project><modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId><artifactId>bom-parent</artifactId>
+                  <version>1.0</version><packaging>pom</packaging>
+                  <properties><target.version>7.7</target.version></properties>
+                  <dependencyManagement><dependencies>
+                    <dependency><groupId>com.example</groupId><artifactId>target-lib</artifactId>
+                      <version>${target.version}</version></dependency>
+                  </dependencies></dependencyManagement>
+                </project>
+                """);
+        writeRepoPom(repo, "com.example", "leaf-bom", "1.0", """
+                <project><modelVersion>4.0.0</modelVersion>
+                  <parent><groupId>com.example</groupId><artifactId>bom-parent</artifactId>
+                    <version>1.0</version></parent>
+                  <artifactId>leaf-bom</artifactId><packaging>pom</packaging>
+                </project>
+                """);
+
+        String v = new MavenBuildTool().findManagedVersion(
+                projectImporting("com.example", "leaf-bom", "1.0"), "com.example", "target-lib");
+        assertThat(v).isEqualTo("7.7");
+    }
+
+    @Test
+    void returnsNullWhenBomDoesNotManageTarget() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        useLocalRepo(repo);
+        writeRepoPom(repo, "com.example", "some-bom", "1.0", """
+                <project><modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId><artifactId>some-bom</artifactId>
+                  <version>1.0</version><packaging>pom</packaging>
+                  <dependencyManagement><dependencies>
+                    <dependency><groupId>com.example</groupId><artifactId>other-lib</artifactId>
+                      <version>1.2.3</version></dependency>
+                  </dependencies></dependencyManagement>
+                </project>
+                """);
+
+        String v = new MavenBuildTool().findManagedVersion(
+                projectImporting("com.example", "some-bom", "1.0"), "com.example", "target-lib");
+        assertThat(v).isNull();
+    }
+
+    @Test
+    void importCycleDoesNotStackOverflow() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        useLocalRepo(repo);
+        // bom-a imports bom-b imports bom-a (cycle); neither manages the target
+        writeRepoPom(repo, "com.example", "bom-a", "1.0", """
+                <project><modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId><artifactId>bom-a</artifactId>
+                  <version>1.0</version><packaging>pom</packaging>
+                  <dependencyManagement><dependencies>
+                    <dependency><groupId>com.example</groupId><artifactId>bom-b</artifactId>
+                      <version>1.0</version><type>pom</type><scope>import</scope></dependency>
+                  </dependencies></dependencyManagement>
+                </project>
+                """);
+        writeRepoPom(repo, "com.example", "bom-b", "1.0", """
+                <project><modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId><artifactId>bom-b</artifactId>
+                  <version>1.0</version><packaging>pom</packaging>
+                  <dependencyManagement><dependencies>
+                    <dependency><groupId>com.example</groupId><artifactId>bom-a</artifactId>
+                      <version>1.0</version><type>pom</type><scope>import</scope></dependency>
+                  </dependencies></dependencyManagement>
+                </project>
+                """);
+
+        String v = new MavenBuildTool().findManagedVersion(
+                projectImporting("com.example", "bom-a", "1.0"), "com.example", "target-lib");
+        assertThat(v).isNull();
+    }
 }
