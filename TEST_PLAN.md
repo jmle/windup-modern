@@ -126,15 +126,18 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
 
 ---
 
-## Process
-- **CI per PR:** L1 + L2 + fast koncur subset.
-- **Nightly:** full koncur corpus (differential) + L3 + L5 perf/soak.
+## Process (current)
+- **Per PR:** `unit-tests.yaml` — L1 (JUnit, incl. the L2 synthetic oracle) + the triage-harness tests. Fast.
+- **Nightly + on demand:** `koncur-differential.yaml` — full differential corpus vs koncur `main`, **gating**
+  (see `testing/DIFFERENTIAL_HARNESS.md`). L3/L5 (dependency/Gradle, perf, soak) still to be added here.
 - **Shadow/canary:** run Java provider alongside Go on real analyses and diff *before* flipping default.
+- The stale forked-baseline `koncur-e2e` PR job has been **retired** (MTA-8152).
 
 ## Exit criteria for the switch
-- [ ] Zero **bucket-(b)** correctness regressions across the corpus.
-- [ ] Dependency parity vs Maven/Gradle within agreed tolerance (BOM imports resolved).
-- [ ] All `location` types + `referenced`/`dependency` features covered by the L2 synthetic oracle.
-- [ ] Perf within bounds of `RESOURCE_COMPARISON.md`; no CI perf regression.
-- [ ] Soak/leak test clean (RSS + disk stable over N Init/Stop cycles).
+- [x] Zero **bucket-(b)** correctness regressions across the corpus — *first differential run: 0 unexplained, 0 regressions.*
+- [~] Dependency parity vs Maven/Gradle — *Maven/BOM done + parity test; **Gradle still to validate**.*
+- [~] All `location` types + `referenced`/`dependency` features covered by the L2 synthetic oracle — *core locations covered; extend `annotated`/`filepaths`/dependency.*
+- [ ] Perf within bounds of `RESOURCE_COMPARISON.md`; no CI perf regression — *not started (MTA-8157).*
+- [ ] Soak/leak test clean (RSS + disk stable over N Init/Stop cycles) — *not started (MTA-8157).*
+- [ ] Works via Tackle Hub in-cluster (production path) — *CLI proven; hub pending (MTA-8159).*
 - [ ] Parity ledger reviewed and signed off.
