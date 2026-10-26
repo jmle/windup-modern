@@ -26,3 +26,7 @@ Thumbs.db
 slides/*.html
 slides/*.pdf
 slides/*.pptx
+
+# Python
+__pycache__/
+*.pyc
