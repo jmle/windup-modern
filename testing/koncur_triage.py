@@ -153,10 +153,13 @@ def diff_test(test, golden, actual, cfg):
                 divs.append(Divergence(test, name, rule, "java-fewer", inc))
             for inc in added:
                 divs.append(Divergence(test, name, rule, "java-more", inc))
-        for tag in sorted(g["tags"] ^ a["tags"]):
-            divs.append(Divergence(test, name, tag, "tag", tag))
-        for rule in sorted(g["unmatched"] ^ a["unmatched"]):
-            divs.append(Divergence(test, name, rule, "unmatched", rule))
+        for tag in sorted(g["tags"] - a["tags"]):
+            divs.append(Divergence(test, name, tag, "tag-dropped", tag))  # java detects FEWER techs
+        for tag in sorted(a["tags"] - g["tags"]):
+            divs.append(Divergence(test, name, tag, "tag-added", tag))    # java detects MORE techs
+        # NOTE: `unmatched` rule lists are intentionally NOT diffed — a rule is in `unmatched` iff it
+        # produced no incidents, so diffing it just double-counts the incident signal (java-more/fewer)
+        # as noise. Incidents (violations + insights) are the source of truth.
     return divs
 
 
@@ -169,6 +172,13 @@ def classify(div, ledger):
             continue
         if not rule_matches(e.get("rule"), div.rule):
             continue
+        dirs = e.get("direction")
+        if dirs is not None:
+            if isinstance(dirs, str):
+                dirs = [dirs]
+            if div.kind not in dirs:
+                continue  # entry only covers some directions (e.g. accept java-more/tag-added,
+                          # but still flag java-fewer/tag-dropped regressions)
         cls, status = e.get("classification"), e.get("status")
         if cls in ("go-wrong", "benign") and status in ("accepted", "excluded"):
             return EXPLAINED

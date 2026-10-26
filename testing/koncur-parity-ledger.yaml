@@ -70,14 +70,17 @@ entries:
 
   - id: seam-booking-source-only-annotation-misses
     test: seam-booking
-    rulesets: [eap6/java-ee/seam, eap7/weblogic, eap8/eap7, hibernate, technology-usage]
-    location: annotation
+    # Direction-scoped (not test-wide blanket): accept "java finds MORE" anywhere in seam — more incidents
+    # (java-more) and more technology tags (tag-added) — the known Go source-only limitation (it misses
+    # annotations across many rules). Any "java finds FEWER" (java-fewer incidents or tag-dropped) is a
+    # real regression: NOT auto-passed, it fails the gate. Differential run 40327871051: 278 java-more +
+    # 10 tag-added, 0 java-fewer, 0 tag-dropped.
+    direction: [java-more, tag-added]
     classification: go-wrong
-    direction: java-more
     summary: >
       In source-only mode Go/JDTLS cannot confirm an annotation's type without library bytes, so it
       misses real @Entity, @NamedQuery, Hibernate annotations and javax imports. Java resolves the FQN
-      from imports and matches correctly.
+      from imports and matches correctly, so it reports more sites across the seam rulesets.
     resolution: >
       Accept Java output; 5 rulesets' goldens grow (seam violations/insights/tags added, new `hibernate`
       ruleset). ~45 "errors" were Go misses.
@@ -143,63 +146,10 @@ entries:
     evidence: FAILING_TESTS.md#3-petclinic
     status: excluded
 
-  # ── Untriaged deltas on koncur main since the prior triage (merge-base 70eee77 -> 5ce4fb0) ──
-  # These landed after the forked branch was cut, so they have NOT been run against the new provider yet.
-  # Re-sync must triage each of these.
-
-  - id: delta-quarkus-3.40-baselines
-    source_commit: 5ce4fb0
-    summary: "koncur #131 — updated quarkus/springboot baselines for Quarkus 3.40 rules (MTA-8020)."
-    status: needs-triage
-
-  # ── Observed in CI run 39956522958 (2026-10-23) ──────────────────────────────
-  # Root cause: golden pinned to stale forked SHA while analysis pulls rulesets :latest.
-  # These are RULE-CONTENT drift, not provider regressions — the incidents match on file+line,
-  # only message/links differ, and new rules appear. Fix: pin baseline.ruleset_ref AND/OR have the
-  # comparator ignore volatile fields (message/links). Affected tests: daytrader, book-server (deps+source).
-
-  - id: drift-quarkus-maven-tooling-message-and-link
-    tests: [daytrader, book-server-deps, book-server-source]
-    location: dependency
-    classification: benign
-    direction: java-different
-    summary: >
-      On pom.xml dependency incidents the provider matches the correct file+line, but koncur reports
-      "failed to match on: message" and a missing "Quarkus - Guide" maven-tooling link — the rule's
-      message/link text changed in :latest rulesets vs the pinned golden.
-    evidence: "CI run 39956522958 — file:///source/pom.xml:5 (+ daytrader-ee7 sub-poms)"
-    resolution: Pin ruleset_ref; have the comparator ignore message/links unless a test asserts them.
-    status: open
-
-  - id: delta-hibernate-orm7-to-quarkus-rules
-    tests: [daytrader]
-    classification: benign
-    direction: java-different
-    summary: >
-      New rules hibernate-orm7-to-quarkus-00010..00090 exist in :latest rulesets but not in the pinned
-      golden, so they surface as "unexpected unmatched rule." New-rule coverage, not a provider issue.
-    evidence: "CI run 39956522958 — Daytrader"
-    resolution: Pick up when the baseline is re-synced to current rules.
-    status: needs-triage
-
-  - id: delta-new-openjdk-rules
-    source_commit: ca8d5ad
-    summary: "koncur #126 — tests changed for new OpenJDK rules."
-    status: needs-triage
-
-  - id: delta-tackle-testapp-labelselector
-    source_commit: cc2ba55
-    test: tackle-testapp-with-deps
-    summary: "koncur #128 — runs with a specific labelSelector now."
-    status: needs-triage
-
-  - id: delta-nerd-dinner-full
-    source_commit: 9b9fd3f
-    test: nerd-dinner-full
-    summary: "koncur #112 — new full-analysis test added (.NET; verify it's out of scope for the Java provider)."
-    status: needs-triage
-
-  - id: delta-update-test-results
-    source_commit: 50a348a
-    summary: "koncur #124 — 'Update test results' (verify which goldens moved)."
-    status: needs-triage
+  # NOTE: the earlier speculative `delta-*` / `drift-*` entries (Quarkus 3.40 baselines, new OpenJDK
+  # rules, hibernate-orm7, quarkus maven-tooling message/link drift, tackle labelSelector,
+  # nerd-dinner-full, "update test results") were removed. They were artifacts of the STALE forked
+  # baseline (CI run 39956522958); the first differential run against vanilla main (40327871051) shows
+  # none of them actually diverge, so they no longer need tracking. The `needs-triage` ones also had no
+  # `test` scope and were acting as a global catch-all. This ledger now reflects the real observed
+  # divergence set vs koncur main.

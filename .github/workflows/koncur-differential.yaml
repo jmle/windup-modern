@@ -2,17 +2,15 @@ name: Koncur Differential (vs main)
 
 # Runs the new Java provider against VANILLA koncur `main` (not the pinned forked golden branch),
 # regenerates the provider's output per test, and classifies every divergence vs the Go golden using
-# the parity ledger (testing/koncur_triage.py). Advisory: it never blocks — its job is to surface the
-# real divergence set so the ledger can be filled in (MTA-8153), ahead of making it a gate.
+# the parity ledger (testing/koncur_triage.py). GATING: the job fails if any divergence is UNEXPLAINED
+# or PENDING (a tracked java-wrong can be tolerated with --allow-known). Runs nightly + on demand
+# (heavy: ~90 min). Replaces the stale forked-baseline koncur-e2e job (MTA-8152). Per-PR correctness is
+# guarded by the lighter unit-tests workflow.
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '41 3 * * *'
-  # TEMPORARY: lets this run on PR #1 to produce the first divergence set, since workflow_dispatch
-  # only works from the default branch. Remove after the first run (keep dispatch + schedule).
-  pull_request:
-    branches: [main]
 
 jobs:
   koncur-differential:
@@ -90,9 +88,8 @@ jobs:
         # The committed version (git HEAD) remains the Go golden of record.
         run: koncur generate -d tests -t kantra || true
 
-      - name: Ledger-driven differential triage (advisory)
+      - name: Ledger-driven differential triage (gating)
         id: triage
-        continue-on-error: true
         working-directory: /tmp/koncur
         run: |
           mkdir -p /tmp/triage-reports

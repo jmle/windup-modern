@@ -71,11 +71,17 @@ class DiffTests(unittest.TestCase):
         actual = [ruleset("rs", {"r1": {"incidents": [incident("file:///source/A.java", 11)]}})]
         self.assertEqual(len(kt.diff_test("t", golden, actual, CFG)), 2)  # fewer + more
 
-    def test_unmatched_rule_divergence(self):
+    def test_unmatched_lists_are_not_diffed(self):
+        # `unmatched` is the inverse of incidents -> intentionally ignored (no noise divergences)
         golden = [ruleset("rs", unmatched=["only-in-golden"])]
         actual = [ruleset("rs", unmatched=["new-rule-00010"])]
-        kinds = {(d.kind, d.rule) for d in kt.diff_test("t", golden, actual, CFG)}
-        self.assertIn(("unmatched", "new-rule-00010"), kinds)
+        self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
+
+    def test_tag_added_and_dropped_directions(self):
+        golden = [ruleset("rs", tags=["Kept", "Dropped"])]
+        actual = [ruleset("rs", tags=["Kept", "Added"])]
+        kinds = {(d.kind, d.detail) for d in kt.diff_test("t", golden, actual, CFG)}
+        self.assertEqual(kinds, {("tag-dropped", "Dropped"), ("tag-added", "Added")})
 
 
 class ClassifyGateTests(unittest.TestCase):
@@ -106,6 +112,15 @@ class ClassifyGateTests(unittest.TestCase):
 
     def test_no_entry_is_unexplained(self):
         self.assertEqual(kt.classify(self._div(), []), kt.UNEXPLAINED)
+
+    def test_direction_scoped_entry_accepts_one_direction_only(self):
+        # accept "java finds more" test-wide, but still flag "java finds fewer" (a regression)
+        ledger = [{"test": "seam-booking", "direction": "java-more",
+                   "classification": "go-wrong", "status": "accepted"}]
+        more = kt.Divergence("seam-booking", "rs", "r1", "java-more", ("u", 1, False))
+        fewer = kt.Divergence("seam-booking", "rs", "r1", "java-fewer", ("u", 1, False))
+        self.assertEqual(kt.classify(more, ledger), kt.EXPLAINED)
+        self.assertEqual(kt.classify(fewer, ledger), kt.UNEXPLAINED)
 
     def test_wrong_test_does_not_match(self):
         ledger = [{"test": "seam-booking", "classification": "go-wrong", "status": "accepted"}]
