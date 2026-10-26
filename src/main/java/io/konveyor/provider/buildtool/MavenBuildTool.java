@@ -27,7 +27,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Maven {@link BuildTool} implementation using the embedded Maven Resolver API. Parses
@@ -255,48 +257,128 @@ public class MavenBuildTool implements BuildTool {
         return resolved;
     }
 
-    private String findManagedVersion(Model model, String groupId, String artifactId) {
+    private static final int MAX_BOM_DEPTH = 10;
+
+    private static boolean isImportBom(org.apache.maven.model.Dependency d) {
+        return "pom".equals(d.getType()) && "import".equals(d.getScope());
+    }
+
+    String findManagedVersion(Model model, String groupId, String artifactId) {
         if (model.getDependencyManagement() == null) return null;
         java.util.Properties properties = buildProperties(model, null);
+
+        // 1. Direct dependencyManagement entry.
         for (org.apache.maven.model.Dependency managed : model.getDependencyManagement().getDependencies()) {
-            if (groupId.equals(managed.getGroupId()) && artifactId.equals(managed.getArtifactId())) {
-                return managed.getVersion();
+            if (isImportBom(managed)) continue;
+            String mg = resolveProperties(managed.getGroupId(), properties);
+            String ma = resolveProperties(managed.getArtifactId(), properties);
+            if (groupId.equals(mg) && artifactId.equals(ma)) {
+                return resolveProperties(managed.getVersion(), properties);
             }
-            if ("pom".equals(managed.getType()) && "import".equals(managed.getScope())) {
-                String bomVersion = findVersionInBom(managed, groupId, artifactId, properties);
-                if (bomVersion != null) return bomVersion;
+        }
+
+        // 2. Imported BOMs — resolved recursively (nested imports + parent chain).
+        for (org.apache.maven.model.Dependency managed : model.getDependencyManagement().getDependencies()) {
+            if (!isImportBom(managed)) continue;
+            String bg = resolveProperties(managed.getGroupId(), properties);
+            String ba = resolveProperties(managed.getArtifactId(), properties);
+            String bv = resolveProperties(managed.getVersion(), properties);
+            String found = findVersionInBom(bg, ba, bv, groupId, artifactId, new HashSet<>(), 0);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    /**
+     * Resolves the managed version of {@code targetG:targetA} from the BOM {@code bomG:bomA:bomV},
+     * recursing into the BOM's own imported BOMs and walking its parent chain. All poms are read from
+     * the local repository (populated beforehand by {@link #downloadBomPoms}). The {@code visited} set
+     * guards against import cycles.
+     */
+    private String findVersionInBom(String bomG, String bomA, String bomV,
+                                    String targetG, String targetA,
+                                    Set<String> visited, int depth) {
+        if (depth > MAX_BOM_DEPTH || bomG == null || bomA == null || bomV == null) return null;
+        if (!visited.add(bomG + ":" + bomA + ":" + bomV)) return null;
+
+        Model bomModel = loadPomFromRepo(bomG, bomA, bomV);
+        if (bomModel == null) return null;
+
+        List<Model> chain = modelWithParents(bomModel);
+        java.util.Properties props = effectiveProperties(bomModel);
+
+        // 1. Direct management across the BOM and its parents.
+        for (Model m : chain) {
+            if (m.getDependencyManagement() == null) continue;
+            for (org.apache.maven.model.Dependency managed : m.getDependencyManagement().getDependencies()) {
+                if (isImportBom(managed)) continue;
+                String mg = resolveProperties(managed.getGroupId(), props);
+                String ma = resolveProperties(managed.getArtifactId(), props);
+                if (targetG.equals(mg) && targetA.equals(ma)) {
+                    String ver = resolveProperties(managed.getVersion(), props);
+                    if (ver != null) return ver;
+                }
+            }
+        }
+
+        // 2. Nested imported BOMs across the BOM and its parents.
+        for (Model m : chain) {
+            if (m.getDependencyManagement() == null) continue;
+            for (org.apache.maven.model.Dependency managed : m.getDependencyManagement().getDependencies()) {
+                if (!isImportBom(managed)) continue;
+                String ng = resolveProperties(managed.getGroupId(), props);
+                String na = resolveProperties(managed.getArtifactId(), props);
+                String nv = resolveProperties(managed.getVersion(), props);
+                String found = findVersionInBom(ng, na, nv, targetG, targetA, visited, depth + 1);
+                if (found != null) return found;
             }
         }
         return null;
     }
 
-    private String findVersionInBom(org.apache.maven.model.Dependency bomDep,
-                                     String groupId, String artifactId,
-                                     java.util.Properties parentProperties) {
-        String bomGroupId = resolveProperties(bomDep.getGroupId(), parentProperties);
-        String bomArtifactId = resolveProperties(bomDep.getArtifactId(), parentProperties);
-        String bomVersion = resolveProperties(bomDep.getVersion(), parentProperties);
-        if (bomVersion == null) return null;
-
-        Path localRepo = getLocalRepoPath();
-        Path bomPom = resolveJarPath(localRepo, bomGroupId, bomArtifactId, bomVersion, null, "pom");
-        if (bomPom == null) return null;
-
+    /** Loads and parses a pom from the local repository, or returns null if absent/unparseable. */
+    private Model loadPomFromRepo(String groupId, String artifactId, String version) {
+        if (groupId == null || artifactId == null || version == null) return null;
+        Path pom = resolveJarPath(getLocalRepoPath(), groupId, artifactId, version, null, "pom");
+        if (pom == null) return null;
         try {
-            Model bomModel = parsePom(bomPom);
-            if (bomModel.getDependencyManagement() == null) return null;
-            java.util.Properties bomProps = buildProperties(bomModel, null);
-            for (org.apache.maven.model.Dependency managed : bomModel.getDependencyManagement().getDependencies()) {
-                String mGroupId = resolveProperties(managed.getGroupId(), bomProps);
-                String mArtifactId = resolveProperties(managed.getArtifactId(), bomProps);
-                if (groupId.equals(mGroupId) && artifactId.equals(mArtifactId)) {
-                    return resolveProperties(managed.getVersion(), bomProps);
-                }
-            }
+            return parsePom(pom);
         } catch (Exception e) {
-            LOG.debug("Failed to parse BOM pom {}:{}:{}: {}", bomGroupId, bomArtifactId, bomVersion, e.getMessage());
+            LOG.debug("Failed to parse pom {}:{}:{}: {}", groupId, artifactId, version, e.getMessage());
+            return null;
         }
-        return null;
+    }
+
+    /** The model plus its parent chain (parents loaded from the local repo), closest first. */
+    private List<Model> modelWithParents(Model model) {
+        List<Model> chain = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        Model cur = model;
+        while (cur != null && chain.size() <= MAX_BOM_DEPTH) {
+            chain.add(cur);
+            org.apache.maven.model.Parent p = cur.getParent();
+            if (p == null) break;
+            if (!seen.add(p.getGroupId() + ":" + p.getArtifactId() + ":" + p.getVersion())) break;
+            cur = loadPomFromRepo(p.getGroupId(), p.getArtifactId(), p.getVersion());
+        }
+        return chain;
+    }
+
+    /** Properties merged across the model's parent chain (child overrides parent), plus project coords. */
+    private java.util.Properties effectiveProperties(Model model) {
+        List<Model> chain = modelWithParents(model);
+        java.util.Properties props = new java.util.Properties();
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            if (chain.get(i).getProperties() != null) props.putAll(chain.get(i).getProperties());
+        }
+        Model leaf = chain.get(0);
+        String v = leaf.getVersion() != null ? leaf.getVersion()
+                : (leaf.getParent() != null ? leaf.getParent().getVersion() : null);
+        if (v != null) props.putIfAbsent("project.version", v);
+        String g = leaf.getGroupId() != null ? leaf.getGroupId()
+                : (leaf.getParent() != null ? leaf.getParent().getGroupId() : null);
+        if (g != null) props.putIfAbsent("project.groupId", g);
+        return props;
     }
 
     private DagEntry buildDagEntry(DependencyNode node, Path localRepo, String pomPath,
@@ -343,28 +425,63 @@ public class MavenBuildTool implements BuildTool {
                                   RepositorySystem repoSystem,
                                   DefaultRepositorySystemSession session,
                                   List<RemoteRepository> remoteRepos) {
+        Set<String> visited = new HashSet<>();
         List<Model> models = parentModel != null ? List.of(model, parentModel) : List.of(model);
         for (Model m : models) {
             if (m.getDependencyManagement() == null) continue;
             java.util.Properties properties = buildProperties(m, parentModel);
             for (org.apache.maven.model.Dependency managed : m.getDependencyManagement().getDependencies()) {
-                if (!"pom".equals(managed.getType()) || !"import".equals(managed.getScope())) continue;
-                String bomGroupId = resolveProperties(managed.getGroupId(), properties);
-                String bomArtifactId = resolveProperties(managed.getArtifactId(), properties);
-                String bomVersion = resolveProperties(managed.getVersion(), properties);
-                if (bomVersion == null) continue;
+                if (!isImportBom(managed)) continue;
+                downloadBomClosure(
+                        resolveProperties(managed.getGroupId(), properties),
+                        resolveProperties(managed.getArtifactId(), properties),
+                        resolveProperties(managed.getVersion(), properties),
+                        repoSystem, session, remoteRepos, visited, 0);
+            }
+        }
+    }
 
-                Path existing = resolveJarPath(getLocalRepoPath(), bomGroupId, bomArtifactId, bomVersion, null, "pom");
-                if (existing != null) continue;
+    /**
+     * Downloads a BOM pom and its transitive closure (nested imported BOMs + parent chain) into the
+     * local repository, so that {@link #findVersionInBom} can read the full graph offline.
+     */
+    private void downloadBomClosure(String groupId, String artifactId, String version,
+                                     RepositorySystem repoSystem,
+                                     DefaultRepositorySystemSession session,
+                                     List<RemoteRepository> remoteRepos,
+                                     Set<String> visited, int depth) {
+        if (depth > MAX_BOM_DEPTH || groupId == null || artifactId == null || version == null) return;
+        if (!visited.add(groupId + ":" + artifactId + ":" + version)) return;
 
-                try {
-                    Artifact bomArtifact = new DefaultArtifact(bomGroupId, bomArtifactId, "pom", bomVersion);
-                    ArtifactRequest request = new ArtifactRequest(bomArtifact, remoteRepos, null);
-                    repoSystem.resolveArtifact(session, request);
-                    LOG.info("Downloaded BOM pom {}:{}:{}", bomGroupId, bomArtifactId, bomVersion);
-                } catch (Exception e) {
-                    LOG.warn("Failed to download BOM pom {}:{}:{}: {}", bomGroupId, bomArtifactId, bomVersion, e.getMessage());
-                }
+        if (resolveJarPath(getLocalRepoPath(), groupId, artifactId, version, null, "pom") == null) {
+            try {
+                Artifact bomArtifact = new DefaultArtifact(groupId, artifactId, "pom", version);
+                repoSystem.resolveArtifact(session, new ArtifactRequest(bomArtifact, remoteRepos, null));
+                LOG.info("Downloaded BOM pom {}:{}:{}", groupId, artifactId, version);
+            } catch (Exception e) {
+                LOG.warn("Failed to download BOM pom {}:{}:{}: {}", groupId, artifactId, version, e.getMessage());
+                return;
+            }
+        }
+
+        Model m = loadPomFromRepo(groupId, artifactId, version);
+        if (m == null) return;
+
+        // Parent chain first, so property resolution for nested imports can see inherited properties.
+        if (m.getParent() != null) {
+            downloadBomClosure(m.getParent().getGroupId(), m.getParent().getArtifactId(),
+                    m.getParent().getVersion(), repoSystem, session, remoteRepos, visited, depth + 1);
+        }
+
+        if (m.getDependencyManagement() != null) {
+            java.util.Properties props = effectiveProperties(m);
+            for (org.apache.maven.model.Dependency managed : m.getDependencyManagement().getDependencies()) {
+                if (!isImportBom(managed)) continue;
+                downloadBomClosure(
+                        resolveProperties(managed.getGroupId(), props),
+                        resolveProperties(managed.getArtifactId(), props),
+                        resolveProperties(managed.getVersion(), props),
+                        repoSystem, session, remoteRepos, visited, depth + 1);
             }
         }
     }
