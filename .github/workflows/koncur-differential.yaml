@@ -9,6 +9,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '41 3 * * *'
+  # TEMPORARY: lets this run on PR #1 to produce the first divergence set, since workflow_dispatch
+  # only works from the default branch. Remove after the first run (keep dispatch + schedule).
+  pull_request:
+    branches: [main]
 
 jobs:
   koncur-differential:
