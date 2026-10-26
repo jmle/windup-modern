@@ -1,5 +1,17 @@
 # Failing E2E Tests (Koncur)
 
+> **HISTORICAL — superseded.** This is a point-in-time snapshot (2026-08-18) from when E2E ran against
+> the **stale forked golden baseline**. The current source of truth is the **ledger-driven differential
+> vs vanilla koncur `main`**: see `testing/koncur-parity-ledger.yaml` and `testing/DIFFERENTIAL_HARNESS.md`.
+> This file remains as the ledger's seed/history.
+>
+> Resolution status of the items below:
+> - **BOM transitive deps (§5a):** fixed — recursive BOM-import resolution + parity test.
+> - **Dependency pom.xml line numbers (§5b):** fixed — static-parsing extras + `GetDependencyLocation` RPC tests.
+> - **Daytrader / Seam "failures":** confirmed to be the *Go* provider being wrong (over-match / source-only
+>   misses); the new provider is correct. Captured as `go-wrong` ledger entries.
+> - The latest differential run shows **0 unexplained divergences, 0 regressions** across all 17 apps.
+
 Status as of CI run [32121844946](https://github.com/jmle/windup-modern/actions/runs/32121844946) (2026-08-18).
 
 **17 total | 6 passed | 6 skipped | 5 failing**

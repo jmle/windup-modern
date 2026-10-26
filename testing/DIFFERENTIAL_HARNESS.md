@@ -28,9 +28,14 @@ truth (Go is sometimes wrong; those are `go-wrong` ledger entries).
   (incl. `/cache/m2` vs `/m2`). Source paths match exactly on `(uri, line)`; **non-source paths**
   (decompiled `java-project/` + dependency `m2`) match by **incident count per file**, ignoring line —
   decompiler line numbers differ across providers (Vineflower vs fernflower), so a pure line shift must
-  not register as a divergence.
-- **`test_koncur_triage.py`** — unit tests (15) covering diff, normalization, tolerance, classification,
-  and gate behavior. Run: `cd testing && python3 -m unittest -v test_koncur_triage`.
+  not register as a divergence. Classification is **direction-aware**: a ledger entry may accept only
+  certain directions (e.g. `direction: [java-more, tag-added]`) so "new provider finds more" is allowed
+  while a regression ("finds fewer" / `tag-dropped`) still fails the gate. Technology tags are diffed as
+  `tag-added` / `tag-dropped`; the `unmatched` rule list is **not** diffed (it is the inverse of the
+  incident signal — redundant noise).
+- **`test_koncur_triage.py`** — unit tests (19) covering diff, normalization, count-based non-source
+  matching, direction-aware classification, and the gate. Run:
+  `cd testing && python3 -m unittest -v test_koncur_triage`.
 - **`koncur-parity-ledger.yaml`** — the durable triage record (seeded from `FAILING_TESTS.md`).
 
 ## Usage (single test)
@@ -44,17 +49,20 @@ python3 testing/koncur_triage.py \
 # exit 0 = clean; 1 = UNEXPLAINED/PENDING (or KNOWN_BUG without --allow-known)
 ```
 
-## CI rollout plan
+## CI (current)
 
-1. **Populate (advisory):** add a workflow that clones koncur `main` (not the forked SHA), runs the new
-   provider per test, and runs `koncur_triage.py` per test **advisory** (`continue-on-error`). Its job is
-   to surface the real divergence set so the ledger can be filled in (resolve every `PENDING`/`UNEXPLAINED`
-   into an accepted `go-wrong`/`benign` or a tracked `java-wrong`).
-2. **Gate:** once the ledger explains the steady-state divergences, flip the job to blocking and retire the
-   pinned forked-branch `koncur-e2e` job (MTA-8152).
+- **`.github/workflows/koncur-differential.yaml`** — clones koncur `main`, regenerates per-test output
+  with the new provider (`koncur generate`), and runs `koncur_triage.py` per test. **Gating** (fails on
+  any UNEXPLAINED/PENDING; a tracked `java-wrong` can be tolerated with `--allow-known`). Runs **nightly
+  + on demand** (heavy, ~90 min). First real run: all 17 apps clean (daytrader 13 + seam 288 explained,
+  0 regressions).
+- **`.github/workflows/unit-tests.yaml`** — fast **per-PR** gate (`mvn test` + the triage harness tests).
+- The stale forked-baseline `koncur-e2e` workflow has been **retired** (MTA-8152). `koncur-hub-e2e` still
+  pins the forked SHA — it needs the same differential treatment before the forked branch can be deleted.
 
 ## Follow-ups
 
+- Give `koncur-hub-e2e` the differential treatment (then delete the forked `koncur-new-java-provider` branch).
 - Batch/directory mode (triage all tests in one invocation) + an aggregate summary.
 - Emit machine-readable output (JSON) for a parity dashboard.
 - Pin `ruleset_ref` / kantra digest in the ledger `baseline` so runs are reproducible (the Quarkus-3.40

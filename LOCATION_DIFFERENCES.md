@@ -191,14 +191,15 @@ their own bucket.
 
 | Aspect | Go Provider | Our Provider |
 |--------|------------|--------------|
-| Search | FIELD / ALL\_OCCURRENCES | ENUM bucket (empty) |
-| Provider | `EnumConstantSymbolProvider` (filters for `IField.isEnumConstant()`) | Not implemented |
+| Search | FIELD / ALL\_OCCURRENCES | ENUM bucket |
+| Provider | `EnumConstantSymbolProvider` (filters for `IField.isEnumConstant()`) | Direct bucket lookup |
 | Filter | `filterDefault` (pass-through) | None |
 
 **Go inconsistency**: ENUM searches the FIELD index and filters for enum constants.
-**Our gap**: We don't index enum constants at all. `visit(EnumDeclaration)` adds the
-enum type at CLASS location, but there is no `visit(EnumConstantDeclaration)`. The
-ENUM bucket is always empty.
+**Our behavior** (implemented): `visit(EnumDeclaration)` indexes the enum type at both CLASS
+and ENUM locations, and `visit(EnumConstantDeclaration)` indexes each constant (declaration and
+references) at ENUM. Covered by `SymbolIndexTest`. _(This doc previously listed ENUM as
+unimplemented — that is outdated.)_
 
 ### VARIABLE\_DECLARATION (location string `"variable_declaration"`, Go int 9)
 
@@ -231,7 +232,7 @@ ENUM bucket is always empty.
 | 1 | IMPORT/TYPE/ANNOTATION share search | No | We use separate buckets — cleaner |
 | 2 | PACKAGE overlaps with IMPORT | **Yes** | `queryPackage()` derives from IMPORT bucket |
 | 3 | ANNOTATION leaks non-annotation matches | No | Our ANNOTATION bucket has only real `@Annotation` usages |
-| 4 | ENUM searches FIELD | No | ENUM not implemented at all |
+| 4 | ENUM searches FIELD | No | We index enum type + constants directly into the ENUM bucket |
 | 5 | RETURN\_TYPE searches TYPE | No | RETURN\_TYPE has its own bucket |
 
 ### Unique to our provider
@@ -240,5 +241,4 @@ ENUM bucket is always empty.
 |---|-----------|--------|
 | 1 | **Default ("") maps to TYPE only** — Go's default is TYPE + METHOD + CONSTRUCTOR with a multi-provider chain | Rules with no location miss method calls and constructor calls |
 | 2 | **TYPE includes IMPORT symbols** — Go's TYPE does not include imports | Our TYPE is broader than Go's; could produce extra matches |
-| 3 | **ANNOTATION matches in source-only mode** — Go's JDTLS can't verify annotation types without library JARs | False positives vs Go (Seam booking test) |
-| 4 | **ENUM unimplemented** — no `visit(EnumConstantDeclaration)` | Rules using `location: ENUM` return zero matches |
+| 3 | **ANNOTATION matches in source-only mode** — Go's JDTLS can't verify annotation types without library JARs | More matches vs Go (Seam booking) — generally correct; Go misses them |
