@@ -1,0 +1,142 @@
+name: Koncur Differential (vs main)
+
+# Runs the new Java provider against VANILLA koncur `main` (not the pinned forked golden branch),
+# regenerates the provider's output per test, and classifies every divergence vs the Go golden using
+# the parity ledger (testing/koncur_triage.py). Advisory: it never blocks — its job is to surface the
+# real divergence set so the ledger can be filled in (MTA-8153), ahead of making it a gate.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 3 * * *'
+
+jobs:
+  koncur-differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout (this repo — triage script + ledger)
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install triage deps
+        run: pip install pyyaml
+
+      - name: Build fat JAR
+        run: mvn package -DskipTests -q
+
+      - name: Build Java provider image
+        run: podman build -f Dockerfile.kantra -t localhost/java-provider:test .
+
+      - name: Add local bin to PATH
+        run: |
+          mkdir -p $HOME/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install kantra
+        run: |
+          podman cp $(podman create --name kantra-extract quay.io/konveyor/kantra:latest):/usr/local/bin/kantra . && \
+            podman rm kantra-extract
+          install -m 755 kantra $HOME/.local/bin/kantra
+          rm kantra
+
+      - name: Configure container networking
+        run: |
+          mkdir -p $HOME/.config/containers
+          cat > $HOME/.config/containers/containers.conf << 'EOF'
+          [network]
+          network_cmd_options = ["allow_host_loopback=true"]
+          EOF
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Clone and build koncur (main)
+        run: |
+          git clone --depth 1 https://github.com/konveyor/koncur.git /tmp/koncur
+          cd /tmp/koncur
+          go build -o $HOME/.local/bin/koncur ./cmd/koncur/main.go
+
+      - name: Create target config
+        run: |
+          mkdir -p /tmp/koncur/.koncur/config
+          cat > /tmp/koncur/.koncur/config/target-kantra.yaml << 'EOF'
+          type: kantra
+          kantra:
+            javaProviderImage: localhost/java-provider:test
+          EOF
+
+      - name: Regenerate outputs with the new provider
+        working-directory: /tmp/koncur
+        env:
+          SKIP_MAVEN: "true"
+        # Overwrites each tests/<t>/expected-output.yaml with the NEW provider's output.
+        # The committed version (git HEAD) remains the Go golden of record.
+        run: koncur generate -d tests -t kantra || true
+
+      - name: Ledger-driven differential triage (advisory)
+        id: triage
+        continue-on-error: true
+        working-directory: /tmp/koncur
+        run: |
+          mkdir -p /tmp/triage-reports
+          overall=0
+          for d in tests/*/; do
+            t=$(basename "$d")
+            f="${d}expected-output.yaml"
+            [ -f "$f" ] || continue
+            golden=$(mktemp)
+            if ! git show "HEAD:tests/$t/expected-output.yaml" > "$golden" 2>/dev/null; then
+              rm -f "$golden"; continue
+            fi
+            echo "::group::triage $t"
+            python3 "$GITHUB_WORKSPACE/testing/koncur_triage.py" \
+              --ledger "$GITHUB_WORKSPACE/testing/koncur-parity-ledger.yaml" \
+              --test "$t" --golden "$golden" --actual "$f" \
+              | tee "/tmp/triage-reports/$t.txt"
+            rc=${PIPESTATUS[0]}
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then overall=1; echo "DIVERGENCE (unexplained/known): $t"; fi
+            rm -f "$golden"
+          done
+          echo "overall_triage_rc=$overall" >> "$GITHUB_OUTPUT"
+          echo "Overall triage exit code: $overall (advisory)"
+          exit $overall
+
+      - name: Summarize
+        if: always()
+        run: |
+          echo "## Koncur differential (vs main) — advisory" >> "$GITHUB_STEP_SUMMARY"
+          echo "Triage exit: ${{ steps.triage.outputs.overall_triage_rc }} (0 = all divergences explained by ledger)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -hE "^\[(UNEXPLAINED|PENDING|KNOWN_BUG|EXPLAINED)\]" /tmp/triage-reports/*.txt 2>/dev/null \
+            | sort | uniq -c >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload triage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koncur-differential-triage
+          path: /tmp/triage-reports
+          retention-days: 14
+
+      - name: Upload regenerated outputs (for ledger triage)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koncur-differential-outputs
+          path: /tmp/koncur/tests/**/expected-output.yaml
+          retention-days: 14
