@@ -40,11 +40,31 @@ class DiffTests(unittest.TestCase):
             {"uri": "file:///source/A.java", "lineNumber": 5, "message": "NEW TEXT"}]}})]
         self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
 
-    def test_dependency_line_tolerance(self):
-        # dependency uri, line off by 1 (within tol=2) -> no divergence
+    def test_dependency_line_shift_ignored(self):
+        # dependency uri, different line, same count per file -> no divergence (count-based)
         golden = [ruleset("rs", {"r1": {"incidents": [incident("file:///cache/m2/x/Foo.java", 40)]}})]
         actual = [ruleset("rs", {"r1": {"incidents": [incident("file:///m2/x/Foo.java", 41)]}})]
         self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
+
+    def test_decompiled_binary_line_shift_ignored(self):
+        # java-project/ decompiled output: decompiler line numbers differ; same count -> no divergence
+        golden = [ruleset("rs", {"r1": {"incidents": [
+            incident("file:///source/java-project/src/main/java/A.java", 7),
+            incident("file:///source/java-project/src/main/java/A.java", 8)]}})]
+        actual = [ruleset("rs", {"r1": {"incidents": [
+            incident("file:///source/java-project/src/main/java/A.java", 12),
+            incident("file:///source/java-project/src/main/java/A.java", 13)]}})]
+        self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
+
+    def test_nonsource_count_mismatch_is_divergence(self):
+        # decompiled: golden has 2 incidents in the file, actual 1 -> one java-fewer
+        golden = [ruleset("rs", {"r1": {"incidents": [
+            incident("file:///source/java-project/src/main/java/A.java", 7),
+            incident("file:///source/java-project/src/main/java/A.java", 8)]}})]
+        actual = [ruleset("rs", {"r1": {"incidents": [
+            incident("file:///source/java-project/src/main/java/A.java", 7)]}})]
+        kinds = [d.kind for d in kt.diff_test("t", golden, actual, CFG)]
+        self.assertEqual(kinds, ["java-fewer"])
 
     def test_application_source_no_tolerance(self):
         golden = [ruleset("rs", {"r1": {"incidents": [incident("file:///source/A.java", 10)]}})]

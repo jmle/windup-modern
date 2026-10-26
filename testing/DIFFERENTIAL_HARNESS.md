@@ -24,9 +24,11 @@ truth (Go is sometimes wrong; those are `go-wrong` ledger entries).
 
 - **`koncur_triage.py`** — the classifier/gate. Reads two koncur output YAMLs (golden + actual) and the
   ledger; emits a triage report and an exit code. Normalization (from the ledger `comparator` block):
-  order-insensitive incident sets keyed by `(ruleset, rule, uri, line)`; `message`/`links`/`codeSnip`
-  ignored; `file://` + base-dir prefixes normalized (incl. `/cache/m2` vs `/m2`, `java-project/`
-  mapping); line tolerance for decompiled/dependency URIs.
+  order-insensitive; `message`/`links`/`codeSnip` ignored; `file://` + base-dir prefixes normalized
+  (incl. `/cache/m2` vs `/m2`). Source paths match exactly on `(uri, line)`; **non-source paths**
+  (decompiled `java-project/` + dependency `m2`) match by **incident count per file**, ignoring line —
+  decompiler line numbers differ across providers (Vineflower vs fernflower), so a pure line shift must
+  not register as a divergence.
 - **`test_koncur_triage.py`** — unit tests (15) covering diff, normalization, tolerance, classification,
   and gate behavior. Run: `cd testing && python3 -m unittest -v test_koncur_triage`.
 - **`koncur-parity-ledger.yaml`** — the durable triage record (seeded from `FAILING_TESTS.md`).

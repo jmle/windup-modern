@@ -58,8 +58,10 @@ def rule_matches(entry_rule, rule):
 
 # ── koncur output parsing ───────────────────────────────────────────────────
 
-def is_dependency_uri(uri):
-    return "/m2/" in uri or "/.m2/" in uri or "/cache/m2/" in uri
+def is_nonsource_uri(uri):
+    """Decompiled or dependency paths, where line numbers are not source-faithful and differ by
+    decompiler (e.g. Vineflower vs fernflower). Matched by incident count per file, not by line."""
+    return ("/m2/" in uri or "/.m2/" in uri or "/cache/m2/" in uri or "/java-project/" in uri)
 
 
 def normalize_uri(uri):
@@ -90,7 +92,7 @@ def parse_rulesets(doc):
                 for inc in (body.get("incidents") or []):
                     uri = inc.get("uri", "")
                     incs.append((normalize_uri(uri), int(inc.get("lineNumber", 0) or 0),
-                                 is_dependency_uri(uri)))
+                                 is_nonsource_uri(uri)))
                 rules.setdefault(rule, []).extend(incs)
         out[name] = {
             "rules": rules,
@@ -111,31 +113,46 @@ class Divergence:
         return f"{self.kind} {self.test}/{self.ruleset}/{self.rule}: {self.detail}"
 
 
-def _match_incident(target, pool, tol):
-    """True if an incident equal to target (uri + line within tolerance) exists in pool."""
-    uri, line, is_dep = target
-    allow = tol if is_dep else 0
-    for (u2, l2, _) in pool:
-        if u2 == uri and abs(l2 - line) <= allow:
-            return True
-    return False
+def _diff_incidents(gi, ai):
+    """Returns (removed, added) incidents for one (ruleset, rule).
+
+    Source paths are matched exactly on (uri, line). Non-source paths (decompiled / dependency) are
+    matched by incident COUNT per file, ignoring line numbers — decompiler line numbers are not
+    comparable across providers, so a pure line shift must not count as a divergence.
+    """
+    from collections import Counter
+    removed, added = [], []
+
+    src_g = Counter((u, l) for (u, l, ns) in gi if not ns)
+    src_a = Counter((u, l) for (u, l, ns) in ai if not ns)
+    for key in (src_g - src_a).elements():
+        removed.append((key[0], key[1], False))
+    for key in (src_a - src_g).elements():
+        added.append((key[0], key[1], False))
+
+    dep_g = Counter(u for (u, l, ns) in gi if ns)
+    dep_a = Counter(u for (u, l, ns) in ai if ns)
+    for uri in sorted(set(dep_g) | set(dep_a)):
+        delta = dep_g[uri] - dep_a[uri]
+        for _ in range(delta):
+            removed.append((uri, None, True))
+        for _ in range(-delta):
+            added.append((uri, None, True))
+    return removed, added
 
 
 def diff_test(test, golden, actual, cfg):
-    tol = (cfg.get("line_tolerance") or {}).get("decompiled_or_dependency", 2)
     divs = []
     g_rs, a_rs = parse_rulesets(golden), parse_rulesets(actual)
     for name in sorted(set(g_rs) | set(a_rs)):
         g = g_rs.get(name, {"rules": {}, "tags": set(), "unmatched": set()})
         a = a_rs.get(name, {"rules": {}, "tags": set(), "unmatched": set()})
         for rule in sorted(set(g["rules"]) | set(a["rules"])):
-            gi, ai = g["rules"].get(rule, []), a["rules"].get(rule, [])
-            for inc in gi:
-                if not _match_incident(inc, ai, tol):
-                    divs.append(Divergence(test, name, rule, "java-fewer", inc))
-            for inc in ai:
-                if not _match_incident(inc, gi, tol):
-                    divs.append(Divergence(test, name, rule, "java-more", inc))
+            removed, added = _diff_incidents(g["rules"].get(rule, []), a["rules"].get(rule, []))
+            for inc in removed:
+                divs.append(Divergence(test, name, rule, "java-fewer", inc))
+            for inc in added:
+                divs.append(Divergence(test, name, rule, "java-more", inc))
         for tag in sorted(g["tags"] ^ a["tags"]):
             divs.append(Divergence(test, name, tag, "tag", tag))
         for rule in sorted(g["unmatched"] ^ a["unmatched"]):

@@ -34,9 +34,9 @@ comparator:
   sort_key: [ruleset, rule, uri, line]
   dedup_key: [uri, line, rule]
   uri_normalization: true           # normalize file:// + base-dir; map java-project/ -> logical source
-  line_tolerance:
-    application_source: 0
-    decompiled_or_dependency: 2     # decompiler line numbers drift
+  source_match: exact               # application source: exact (uri, line)
+  nonsource_match: count-per-file   # decompiled (java-project/) + dependency (m2): match by incident
+                                    # count per file, ignoring line (decompiler line numbers differ)
   compare_fields: [ruleset, rule, uri, line]
   ignore_fields: [effort, message]  # unless a test explicitly asserts them
   ignore_empty_rulesets: true
