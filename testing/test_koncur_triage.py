@@ -46,6 +46,21 @@ class DiffTests(unittest.TestCase):
         actual = [ruleset("rs", {"r1": {"incidents": [incident("file:///m2/x/Foo.java", 41)]}})]
         self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
 
+    def test_uri_base_dir_independent(self):
+        # Hub prefixes the repo subdir (…/book-server/src/main/java/X); CLI/golden does not. Same finding.
+        golden = [ruleset("rs", {"r1": {"incidents": [
+            incident("file:///source/src/main/java/com/x/A.java", 14)]}})]
+        actual = [ruleset("rs", {"r1": {"incidents": [
+            incident("file:///source/book-server/src/main/java/com/x/A.java", 14)]}})]
+        self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
+
+    def test_uri_basename_fallback_for_non_src_paths(self):
+        # files not under a src root (e.g. python) fall back to basename, so differing dirs still match
+        golden = [ruleset("rs", {"r1": {"incidents": [incident("file:///source/file_a.py", 3)]}})]
+        actual = [ruleset("rs", {"r1": {"incidents": [
+            incident("file:///source/examples/python/file_a.py", 3)]}})]
+        self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
+
     def test_decompiled_binary_line_shift_ignored(self):
         # java-project/ decompiled output: decompiler line numbers differ; same count -> no divergence
         golden = [ruleset("rs", {"r1": {"incidents": [

@@ -64,19 +64,32 @@ def is_nonsource_uri(uri):
     return ("/m2/" in uri or "/.m2/" in uri or "/cache/m2/" in uri or "/java-project/" in uri)
 
 
+# Anchors that make a URI base-dir-independent: the path *after* the anchor is stable regardless of
+# where the project was checked out / mounted (kantra CLI vs Tackle Hub differ only in the prefix).
+_SRC_ANCHORS = ("/src/main/java/", "/src/test/java/", "/src/main/scala/", "/src/main/kotlin/",
+                "/src/main/resources/", "/src/main/webapp/", "/src/main/", "/src/test/", "/src/")
+_DEP_ANCHORS = ("/cache/m2/", "/.m2/repository/", "/m2/")
+
+
 def normalize_uri(uri):
-    """Collapse scheme + known base-dir prefixes so Go and Java uris are comparable."""
-    u = uri
-    if u.startswith("file://"):
-        u = u[len("file://"):]
-    for root in ("/cache/m2/", "/opt/input/source/"):
-        i = u.find(root)
+    """Collapse scheme + base dir so URIs are comparable across run paths (CLI vs Hub).
+
+    The Hub path prefixes the repo subdir (…/book-server/src/main/java/X) while the CLI/golden path does
+    not (…/src/main/java/X); both must reduce to the same key. We take the path after a stable anchor
+    (src root / m2 / java-project), falling back to the file name.
+    """
+    u = uri[len("file://"):] if uri.startswith("file://") else uri
+    for a in _SRC_ANCHORS:
+        i = u.rfind(a)
         if i >= 0:
-            return ("m2/" if "m2" in root else "source/") + u[i + len(root):]
-    for root in ("/m2/", "/source/"):
-        i = u.find(root)
+            return u[i + len(a):]
+    for a in _DEP_ANCHORS:
+        i = u.rfind(a)
         if i >= 0:
-            return root.strip("/") + "/" + u[i + len(root):]
+            return "m2/" + u[i + len(a):]
+    i = u.rfind("/java-project/")
+    if i >= 0:
+        return u[i + len("/java-project/"):]
     return u.rsplit("/", 1)[-1]  # fall back to the file name
 
 
