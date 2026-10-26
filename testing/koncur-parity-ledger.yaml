@@ -126,7 +126,12 @@ entries:
       Dependency rules (mvc-01220, observability-0100, database-03000, embedded-framework-08400) report
       incidents at pom.xml:0 instead of the expected lines (86, 96, 76, 91) when Aether fails and static
       pom parsing is used.
-    resolution: Add groupId/artifactId/pomPath to static-parsing extras so getDependencyLocation resolves lines.
+    resolution: >
+      Add groupId/artifactId/pomPath to static-parsing extras so getDependencyLocation resolves lines.
+      Verified: fix confirmed present in WorkspaceContext.getDependenciesFromStaticParsing, and the
+      GetDependencyLocation RPC is now covered by DependencyLocationServiceTest (extras present ->
+      correct line; extras missing -> line 0, degrades without crashing). Full E2E against tomcat-legacy
+      still pending (deferred with the rest of the tomcat-legacy work).
     evidence: FAILING_TESTS.md#5b
     status: fixed-pending-ci
 
