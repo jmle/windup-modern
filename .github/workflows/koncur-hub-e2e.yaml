@@ -1,18 +1,24 @@
-name: Koncur Hub E2E Tests
+name: Koncur Hub Differential (vs main)
+
+# In-cluster (Tackle Hub) counterpart of the CLI Koncur Differential workflow: runs the new Java
+# provider through Tackle Hub against VANILLA koncur `main`, regenerates per-test output, and classifies
+# every divergence vs the Go golden using the parity ledger (testing/koncur_triage.py).
+#
+# ADVISORY for now (continue-on-error on the triage step): the hub path can introduce URI/base-dir
+# differences vs the CLI path that need triage (and possibly comparator/ledger tweaks) before this is
+# flipped to gating. Heavy (Kind + Hub, ~90 min); nightly + manual.
 
 on:
-  # Heavy job (Kind + Tackle Hub, ~60 min) — nightly + manual, not on every PR.
-  # The lighter CLI koncur-e2e workflow is the per-PR gate.
   schedule:
     - cron: '17 4 * * *'
   workflow_dispatch:
 
 jobs:
-  koncur-hub-e2e:
+  koncur-hub-differential:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
-      - name: Checkout
+      - name: Checkout (this repo — triage script + ledger)
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -20,6 +26,14 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install triage deps
+        run: pip install pyyaml
 
       - name: Build fat JAR
         run: mvn package -DskipTests -q
@@ -32,14 +46,10 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Clone and build koncur
+      - name: Clone and build koncur (main)
         run: |
-          # Interim: pinned to a fixed SHA on the new-provider golden branch for reproducibility.
-          # TODO(MTA-8153): replace with a differential run against koncur `main`
-          #   (run Go + Java providers, diff and triage) instead of a forked golden baseline.
-          git clone https://github.com/konveyor/koncur.git /tmp/koncur
+          git clone --depth 1 https://github.com/konveyor/koncur.git /tmp/koncur
           cd /tmp/koncur
-          git checkout 002c902ede9d3fe5f08ab96d0e5dacc7dc2112a9
           go build -o $HOME/.local/bin/koncur ./cmd/koncur/main.go
           mkdir -p $HOME/.local/bin
           echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -93,11 +103,52 @@ jobs:
               javaProvider: localhost/java-provider:test
           EOF
 
-      - name: Run koncur tests
+      - name: Regenerate outputs with the new provider (via Hub)
         working-directory: /tmp/koncur
         env:
           SKIP_MAVEN: "true"
-        run: koncur run tests -t tackle-hub --target-config .koncur/config/target-tackle-hub.yaml -o yaml --output-file results-hub.yaml
+        # Overwrites each tests/<t>/expected-output.yaml with the NEW provider's output (run through Hub).
+        # The committed version (git HEAD) remains the Go golden of record.
+        run: koncur generate -d tests -t tackle-hub --target-config .koncur/config/target-tackle-hub.yaml || true
+
+      - name: Ledger-driven differential triage (advisory)
+        id: triage
+        continue-on-error: true
+        working-directory: /tmp/koncur
+        run: |
+          mkdir -p /tmp/triage-reports
+          overall=0
+          for d in tests/*/; do
+            t=$(basename "$d")
+            f="${d}expected-output.yaml"
+            [ -f "$f" ] || continue
+            golden=$(mktemp)
+            if ! git show "HEAD:tests/$t/expected-output.yaml" > "$golden" 2>/dev/null; then
+              rm -f "$golden"; continue
+            fi
+            echo "::group::triage $t"
+            python3 "$GITHUB_WORKSPACE/testing/koncur_triage.py" \
+              --ledger "$GITHUB_WORKSPACE/testing/koncur-parity-ledger.yaml" \
+              --test "$t" --golden "$golden" --actual "$f" \
+              | tee "/tmp/triage-reports/$t.txt"
+            rc=${PIPESTATUS[0]}
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then overall=1; echo "DIVERGENCE (unexplained/known): $t"; fi
+            rm -f "$golden"
+          done
+          echo "overall_triage_rc=$overall" >> "$GITHUB_OUTPUT"
+          echo "Overall triage exit code: $overall (advisory)"
+          exit $overall
+
+      - name: Summarize
+        if: always()
+        run: |
+          echo "## Koncur Hub differential (vs main) — advisory" >> "$GITHUB_STEP_SUMMARY"
+          echo "Triage exit: ${{ steps.triage.outputs.overall_triage_rc }} (0 = all divergences explained by ledger)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -hE "^\[(UNEXPLAINED|PENDING|KNOWN_BUG|EXPLAINED)\]" /tmp/triage-reports/*.txt 2>/dev/null \
+            | sort | uniq -c >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show Hub status on failure
         if: failure()
@@ -108,31 +159,24 @@ jobs:
           echo "=== Hub Logs ==="
           kubectl logs -n konveyor-tackle -l app.kubernetes.io/name=tackle-hub --tail=100 || true
           echo ""
-          echo "=== Analyzer Pods ==="
-          kubectl get pods -n konveyor-tackle -l app.kubernetes.io/name=tackle2-addon-analyzer --show-labels || true
-          echo ""
           echo "=== Java Provider Pods ==="
           kubectl logs -n konveyor-tackle -l app.kubernetes.io/name=java-external-provider --tail=50 || true
-          echo ""
-          echo "=== Tackle CR ==="
-          kubectl get tackle -n konveyor-tackle -o yaml || true
 
-      - name: Upload test output on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: koncur-hub-output
-          path: /tmp/koncur/.koncur/output
-          retention-days: 5
-          include-hidden-files: true
-
-      - name: Upload results
+      - name: Upload triage reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: koncur-hub-results
-          path: /tmp/koncur/results-hub.yaml
-          retention-days: 5
+          name: koncur-hub-triage
+          path: /tmp/triage-reports
+          retention-days: 14
+
+      - name: Upload regenerated outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koncur-hub-outputs
+          path: /tmp/koncur/tests/**/expected-output.yaml
+          retention-days: 14
 
       - name: Cleanup Kind cluster
         if: always()
