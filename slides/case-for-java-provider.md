@@ -224,6 +224,24 @@ diff every result vs the Go golden, classify each difference.
 
 ---
 
+## How we keep it honest — the parity ledger
+
+**The tempting shortcut:** edit the test's expected answers to match the new tool.
+Then the test always passes — and proves nothing.
+
+**What we do instead:** never change the expected answers. For **every** difference
+between the new provider and the old one, we write down three things:
+
+- **what** is different
+- **who is right** — *old tool is wrong* · *our bug* · *harmless*
+- **why**
+
+That record is the **parity ledger** — one file, kept in version control.
+Any difference **without** an entry makes the check **fail** — so nothing slips through
+unexplained, and every call we made is there for anyone to review.
+
+---
+
 ## Honest trade-off #1 — raw performance (today)
 
 | | Go stack | Native Java |

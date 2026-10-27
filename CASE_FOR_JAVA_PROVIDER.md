@@ -142,6 +142,22 @@ We built a **ledger-driven differential harness** (`testing/koncur_triage.py`, `
 
 ---
 
+## Slide 9c — How we keep it honest: the parity ledger
+
+**The tempting shortcut** would be to edit koncur's expected answers so they match the new provider — then the test always passes and proves nothing (that's the old forked-golden approach we retired).
+
+**What we do instead:** we never change the expected answers. For **every** difference between the new provider and the Go provider, we record three things in one version-controlled file (`testing/koncur-parity-ledger.yaml`):
+
+- **what** is different (test, rule, incident),
+- **who is right** — *Go is wrong* (`go-wrong`) · *our bug* (`java-wrong`) · *harmless* (`benign`),
+- **why** (the rationale).
+
+Any difference **without** a matching ledger entry makes the check **fail**. So nothing slips through unexplained, re-runs only need to triage *new* differences (not re-judge everything), and every decision is auditable.
+
+*Talking point:* This is what turns "trust us, it's correct" into "here is every difference and our justification for it." It's the credibility backbone of the whole validation story.
+
+---
+
 ## Slide 10 — Honest trade-off #1: raw performance (today)
 
 Same benchmark (`RESOURCE_COMPARISON.md` / `OPTIMIZATIONS.md`):
