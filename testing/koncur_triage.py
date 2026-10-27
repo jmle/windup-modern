@@ -166,10 +166,11 @@ def diff_test(test, golden, actual, cfg):
                 divs.append(Divergence(test, name, rule, "java-fewer", inc))
             for inc in added:
                 divs.append(Divergence(test, name, rule, "java-more", inc))
-        for tag in sorted(g["tags"] - a["tags"]):
-            divs.append(Divergence(test, name, tag, "tag-dropped", tag))  # java detects FEWER techs
-        for tag in sorted(a["tags"] - g["tags"]):
-            divs.append(Divergence(test, name, tag, "tag-added", tag))    # java detects MORE techs
+        if cfg.get("diff_tags", True):
+            for tag in sorted(g["tags"] - a["tags"]):
+                divs.append(Divergence(test, name, tag, "tag-dropped", tag))  # detects FEWER techs
+            for tag in sorted(a["tags"] - g["tags"]):
+                divs.append(Divergence(test, name, tag, "tag-added", tag))    # detects MORE techs
         # NOTE: `unmatched` rule lists are intentionally NOT diffed — a rule is in `unmatched` iff it
         # produced no incidents, so diffing it just double-counts the incident signal (java-more/fewer)
         # as noise. Incidents (violations + insights) are the source of truth.
@@ -235,6 +236,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     ledger, cfg = load_ledger(args.ledger)
+    if args.test in (cfg.get("exclude_tests") or []):
+        print(f"SKIPPED: {args.test} is excluded (not a Java-provider test)")
+        return 0
     with open(args.golden) as f:
         golden = yaml.safe_load(f)
     with open(args.actual) as f:

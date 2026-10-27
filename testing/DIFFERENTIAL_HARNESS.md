@@ -32,9 +32,13 @@ truth (Go is sometimes wrong; those are `go-wrong` ledger entries).
   decompiler line numbers differ across providers (Vineflower vs fernflower), so a pure line shift must
   not register as a divergence. Classification is **direction-aware**: a ledger entry may accept only
   certain directions (e.g. `direction: [java-more, tag-added]`) so "new provider finds more" is allowed
-  while a regression ("finds fewer" / `tag-dropped`) still fails the gate. Technology tags are diffed as
-  `tag-added` / `tag-dropped`; the `unmatched` rule list is **not** diffed (it is the inverse of the
-  incident signal — redundant noise).
+  while a regression ("finds fewer") still fails the gate. The `unmatched` rule list is **not** diffed (it
+  is the inverse of the incident signal — redundant noise). **Scope** (ledger `comparator`): `diff_tags:
+  false` — tags are engine/ruleset-version-derived (discovery addon + tagging rules), not the java
+  provider's incident output, so provider parity compares **incidents only**; `exclude_tests` drops
+  non-Java tests (python/go/.NET) which validate other providers. With this scope both the CLI and Hub
+  paths are clean (0 unexplained). _(Tag diffing / direction-scoping remain available if `diff_tags` is
+  re-enabled — e.g. `direction: [java-more, tag-added]`.)_
 - **`test_koncur_triage.py`** — unit tests (19) covering diff, normalization, count-based non-source
   matching, direction-aware classification, and the gate. Run:
   `cd testing && python3 -m unittest -v test_koncur_triage`.
@@ -60,13 +64,12 @@ python3 testing/koncur_triage.py \
   0 regressions).
 - **`.github/workflows/unit-tests.yaml`** — fast **per-PR** gate (`mvn test` + the triage harness tests).
 - The stale forked-baseline `koncur-e2e` workflow has been **retired** (MTA-8152).
-- **`.github/workflows/koncur-hub-e2e.yaml`** — in-cluster (Tackle Hub) differential, **advisory** for now
-  (nightly + manual). First run: base-dir normalization cut noise from ~4069 to ~349, and **0 Java-provider
-  incident regressions**. The residual is **not the provider**: ~345 are `technology-usage`/`discovery-rules`
-  **tag-taxonomy** differences because the Hub analyzer addon pulls a **different ruleset version** than the
-  kantra-generated golden (e.g. tag "Java Source" → "Java"), and 4 are a `python-sample` ruleset-name quirk
-  (`konveyor-analysis` ↔ `files`). **Blocker before hub can gate:** align the Hub addon's ruleset version
-  with the golden's (pin `ruleset_ref`), or scope the hub differential to Java-provider incidents.
+- **`.github/workflows/koncur-hub-e2e.yaml`** — in-cluster (Tackle Hub) differential, **gating** (nightly +
+  manual). The first run's ~4069 "divergences" were base-dir noise (Hub repo-subdir prefix) + tag-taxonomy
+  from the Hub analyzer addon's differing ruleset version + non-Java tests. With base-dir-independent URIs,
+  incidents-only (`diff_tags: false`), and `exclude_tests`, the hub path is clean with **0 Java-provider
+  incident regressions**. (If the Hub addon's ruleset version is later pinned to the golden's, tags could be
+  re-enabled for extra coverage.)
 
 ## Follow-ups
 
