@@ -24,8 +24,10 @@ truth (Go is sometimes wrong; those are `go-wrong` ledger entries).
 
 - **`koncur_triage.py`** — the classifier/gate. Reads two koncur output YAMLs (golden + actual) and the
   ledger; emits a triage report and an exit code. Normalization (from the ledger `comparator` block):
-  order-insensitive; `message`/`links`/`codeSnip` ignored; `file://` + base-dir prefixes normalized
-  (incl. `/cache/m2` vs `/m2`). Source paths match exactly on `(uri, line)`; **non-source paths**
+  order-insensitive; `message`/`links`/`codeSnip` ignored; URIs are **base-dir-independent** — reduced to
+  the path after a stable anchor (`src/main/java/` etc., the `m2` tail, or `java-project/`), with the file
+  name as a fallback — so the Hub path (`…/book-server/src/main/java/X`) and the CLI/golden path
+  (`…/src/main/java/X`) compare equal. Source paths match exactly on `(uri, line)`; **non-source paths**
   (decompiled `java-project/` + dependency `m2`) match by **incident count per file**, ignoring line —
   decompiler line numbers differ across providers (Vineflower vs fernflower), so a pure line shift must
   not register as a divergence. Classification is **direction-aware**: a ledger entry may accept only
@@ -57,8 +59,14 @@ python3 testing/koncur_triage.py \
   + on demand** (heavy, ~90 min). First real run: all 17 apps clean (daytrader 13 + seam 288 explained,
   0 regressions).
 - **`.github/workflows/unit-tests.yaml`** — fast **per-PR** gate (`mvn test` + the triage harness tests).
-- The stale forked-baseline `koncur-e2e` workflow has been **retired** (MTA-8152). `koncur-hub-e2e` still
-  pins the forked SHA — it needs the same differential treatment before the forked branch can be deleted.
+- The stale forked-baseline `koncur-e2e` workflow has been **retired** (MTA-8152).
+- **`.github/workflows/koncur-hub-e2e.yaml`** — in-cluster (Tackle Hub) differential, **advisory** for now
+  (nightly + manual). First run: base-dir normalization cut noise from ~4069 to ~349, and **0 Java-provider
+  incident regressions**. The residual is **not the provider**: ~345 are `technology-usage`/`discovery-rules`
+  **tag-taxonomy** differences because the Hub analyzer addon pulls a **different ruleset version** than the
+  kantra-generated golden (e.g. tag "Java Source" → "Java"), and 4 are a `python-sample` ruleset-name quirk
+  (`konveyor-analysis` ↔ `files`). **Blocker before hub can gate:** align the Hub addon's ruleset version
+  with the golden's (pin `ruleset_ref`), or scope the hub differential to Java-provider incidents.
 
 ## Follow-ups
 
