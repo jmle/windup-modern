@@ -40,6 +40,13 @@ comparator:
   compare_fields: [ruleset, rule, uri, line]
   ignore_fields: [effort, message]  # unless a test explicitly asserts them
   ignore_empty_rulesets: true
+  # Tags are engine/ruleset-version-derived (discovery addon + tagging rules), not the java provider's
+  # incident output — and they drift by ruleset version (Hub addon vs kantra golden). For PROVIDER
+  # parity we compare incidents only; the java-incident signal already captures what the provider finds.
+  diff_tags: false
+  # Non-Java tests validate other providers (python/go/.NET) — out of scope for the java-provider
+  # differential, and they diverge on environment, not the provider.
+  exclude_tests: [golang, python-sample, nerd-dinner, nerd-dinner-full]
 
 entries:
   # ── Seeded from FAILING_TESTS.md ──────────────────────────────────────────────

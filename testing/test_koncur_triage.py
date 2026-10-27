@@ -93,10 +93,18 @@ class DiffTests(unittest.TestCase):
         self.assertEqual(kt.diff_test("t", golden, actual, CFG), [])
 
     def test_tag_added_and_dropped_directions(self):
+        cfg = dict(kt.DEFAULT_CFG); cfg["diff_tags"] = True
         golden = [ruleset("rs", tags=["Kept", "Dropped"])]
         actual = [ruleset("rs", tags=["Kept", "Added"])]
-        kinds = {(d.kind, d.detail) for d in kt.diff_test("t", golden, actual, CFG)}
+        kinds = {(d.kind, d.detail) for d in kt.diff_test("t", golden, actual, cfg)}
         self.assertEqual(kinds, {("tag-dropped", "Dropped"), ("tag-added", "Added")})
+
+    def test_tags_not_diffed_when_disabled(self):
+        # diff_tags=false (ledger policy): tags are engine/ruleset-derived, not provider incidents
+        cfg = dict(kt.DEFAULT_CFG); cfg["diff_tags"] = False
+        golden = [ruleset("rs", tags=["Dropped"])]
+        actual = [ruleset("rs", tags=["Added"])]
+        self.assertEqual(kt.diff_test("t", golden, actual, cfg), [])
 
 
 class ClassifyGateTests(unittest.TestCase):

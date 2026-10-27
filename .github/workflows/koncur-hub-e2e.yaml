@@ -4,9 +4,10 @@ name: Koncur Hub Differential (vs main)
 # provider through Tackle Hub against VANILLA koncur `main`, regenerates per-test output, and classifies
 # every divergence vs the Go golden using the parity ledger (testing/koncur_triage.py).
 #
-# ADVISORY for now (continue-on-error on the triage step): the hub path can introduce URI/base-dir
-# differences vs the CLI path that need triage (and possibly comparator/ledger tweaks) before this is
-# flipped to gating. Heavy (Kind + Hub, ~90 min); nightly + manual.
+# GATING: fails on any UNEXPLAINED/PENDING (a tracked java-wrong can be tolerated with --allow-known).
+# The comparator is base-dir-independent (hub repo-subdir prefix) and the java-provider differential
+# compares incidents only (tags are engine/ruleset-version-derived) over Java tests only — so the
+# hub and CLI paths both come out clean. Heavy (Kind + Hub, ~90 min); nightly + manual.
 
 on:
   schedule:
@@ -111,9 +112,8 @@ jobs:
         # The committed version (git HEAD) remains the Go golden of record.
         run: koncur generate -d tests -t tackle-hub --target-config .koncur/config/target-tackle-hub.yaml || true
 
-      - name: Ledger-driven differential triage (advisory)
+      - name: Ledger-driven differential triage (gating)
         id: triage
-        continue-on-error: true
         working-directory: /tmp/koncur
         run: |
           mkdir -p /tmp/triage-reports
@@ -143,7 +143,7 @@ jobs:
       - name: Summarize
         if: always()
         run: |
-          echo "## Koncur Hub differential (vs main) — advisory" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Koncur Hub differential (vs main) — gating" >> "$GITHUB_STEP_SUMMARY"
           echo "Triage exit: ${{ steps.triage.outputs.overall_triage_rc }} (0 = all divergences explained by ledger)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           grep -hE "^\[(UNEXPLAINED|PENDING|KNOWN_BUG|EXPLAINED)\]" /tmp/triage-reports/*.txt 2>/dev/null \
