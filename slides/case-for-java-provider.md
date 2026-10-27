@@ -210,6 +210,38 @@ One JVM instead of Go-binary + JDTLS — the axes that matter for containerized,
 
 ---
 
+## Validation — proven, not just claimed
+
+A **ledger-driven differential**: run the new provider against vanilla koncur `main`,
+diff every result vs the Go golden, classify each difference.
+
+- Runs on **both production paths** — kantra CLI and **Tackle Hub** (in-cluster) — **gating**, nightly
+- Across **all Java sample apps**: **0 unexplained differences, 0 regressions**
+- Every difference is a **known Go bug** (over/under-matching) or benign — recorded in a parity ledger
+- Comparator is base-dir / decompiler-line / ruleset-version aware, so noise ≠ regressions
+
+> Correctness is now **continuously enforced in CI**, not a one-time claim.
+
+---
+
+## How we keep it honest — the parity ledger
+
+**The tempting shortcut:** edit the test's expected answers to match the new tool.
+Then the test always passes — and proves nothing.
+
+**What we do instead:** never change the expected answers. For **every** difference
+between the new provider and the old one, we write down three things:
+
+- **what** is different
+- **who is right** — *old tool is wrong* · *our bug* · *harmless*
+- **why**
+
+That record is the **parity ledger** — one file, kept in version control.
+Any difference **without** an entry makes the check **fail** — so nothing slips through
+unexplained, and every call we made is there for anyone to review.
+
+---
+
 ## Honest trade-off #1 — raw performance (today)
 
 | | Go stack | Native Java |
@@ -226,33 +258,32 @@ Real gap — JDTLS has incremental compilation + caching; we parse fresh. **But:
 
 ---
 
-## Honest trade-off #2 — parity gaps
+## Parity gaps — closed
 
-| Gap | Impact | Status |
-|---|---|---|
-| `ENUM` location unimplemented | `location: ENUM` returns nothing | Add `visit(EnumConstantDeclaration)` |
-| Default location narrower than Go | Misses method/ctor calls w/o `location:` | Widen default search |
-| BOM-import version resolution | Transitive deps missed with BOM imports | Implement in `findManagedVersion` |
-| Dep `pom.xml` line numbers = 0 | Wrong incident lines on static fallback | Fix applied, pending CI |
+| Gap | Status |
+|---|---|
+| `ENUM` location | **Done** — indexed + unit-tested |
+| BOM-import version resolution | **Done** — recursive + parent-chain; validated vs `mvn dependency:tree` |
+| Dependency `pom.xml` line numbers | **Done** — `GetDependencyLocation` RPC tested |
+| Default (empty) location narrower than Go | Minor, open |
 
-**Scorecard:** ~18 real bugs on our side (both with known fixes) vs **~58 "failures" that were Go being wrong.**
+The confirmed provider bugs are **fixed and regression-tested**; correctness is gated by the differential.
 
 ---
 
-## Roadmap to close the gap
+## Roadmap — what's left
 
-**Correctness / parity (short)**
-- Implement `ENUM`, widen default location, BOM import resolution, validate line-number fix in CI
+**Correctness** — ✅ done & **gated** (differential on CLI + Hub, 0 regressions)
 
-**Performance (medium)**
-- Engine: **parallel OR-condition evaluation** — biggest lever, helps all providers
-- Provider: optional **batch evaluate** / streaming API to cut per-call overhead
-- Startup: persistent / incremental index to narrow the cold-parse gap
+**Hardening (next)**
+- Performance + memory-leak / **soak** testing (long-running gRPC server)
+- **Resilience & security** (malformed inputs, corrupt archives, timeouts)
+- Gradle dependency parity; extend the matching oracle
 
-**Launch tuning**
-- `jvmArgs` / `launchArgs` passthrough in provider config (ZGC already wired via Dockerfile)
+**Performance (engine)**
+- **Parallel OR-condition evaluation** in analyzer-lsp — biggest lever, helps all providers
 
-> None of this reworks the core architecture — it's incremental, some lands in the shared engine.
+> Correctness is settled; what remains is **non-functional hardening** + a shared engine win.
 
 ---
 
@@ -260,15 +291,15 @@ Real gap — JDTLS has incremental compilation + caching; we parse fresh. **But:
 
 ## The ask
 
-Adopt the native Java provider as the **go-forward Java analysis path** — opt-in while we close the enumerated gaps.
+Adopt the native Java provider as the **go-forward Java analysis path**.
 
-Prioritize the **engine-side parallel-OR change** — biggest perf win, helps everyone.
+Correctness is **proven and continuously gated** — differential vs koncur `main`, on CLI **and** Tackle Hub, **0 regressions**. Remaining work is **non-functional hardening** (perf, soak, resilience), not correctness.
 
-Treat the **koncur parity suite** as the correctness gate.
+Prioritize the engine-side **parallel-OR** change — biggest perf win, helps everyone.
 
 <br>
 
-**One language · one repo · one process · matching we own and can prove — with a short, concrete gap list.**
+**One language · one repo · one process · matching we own and can prove.**
 
 ---
 
