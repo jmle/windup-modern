@@ -88,6 +88,91 @@ class ResilienceTest {
         assertThat(eval.get().getResponse().getMatched()).isTrue();
     }
 
+    @Test
+    void initOnTruncatedArchiveIsHandledGracefully() throws Exception {
+        // valid zip, then truncated mid-stream
+        Path jar = tempDir.resolve("truncated.jar");
+        try (OutputStream os = Files.newOutputStream(jar); ZipOutputStream zos = new ZipOutputStream(os)) {
+            zos.putNextEntry(new ZipEntry("a/b/C.txt"));
+            zos.write(new byte[4096]);
+            zos.closeEntry();
+        }
+        byte[] full = Files.readAllBytes(jar);
+        Files.write(jar, java.util.Arrays.copyOf(full, full.length / 2));
+
+        JavaProviderService svc = new JavaProviderService(10);
+        AtomicReference<InitResponse> ref = new AtomicReference<>();
+        svc.init(Config.newBuilder().setLocation(jar.toString()).setAnalysisMode("source-only").build(),
+                capture(ref));
+        assertThat(ref.get()).as("truncated archive must not crash the server").isNotNull();
+    }
+
+    @Test
+    void initOnEmptyArchiveIsHandledGracefully() throws Exception {
+        Path jar = tempDir.resolve("empty.jar");
+        Files.write(jar, new byte[0]);
+
+        JavaProviderService svc = new JavaProviderService(10);
+        AtomicReference<InitResponse> ref = new AtomicReference<>();
+        svc.init(Config.newBuilder().setLocation(jar.toString()).setAnalysisMode("source-only").build(),
+                capture(ref));
+        assertThat(ref.get()).as("zero-byte archive must not crash the server").isNotNull();
+    }
+
+    @Test
+    void dependencyCapabilityWithoutBuildFileIsGraceful() {
+        JavaProviderService svc = new JavaProviderService(10);
+        long id = initSourceDir(svc);  // a source dir with no pom.xml / build.gradle
+
+        AtomicReference<EvaluateResponse> eval = new AtomicReference<>();
+        svc.evaluate(EvaluateRequest.newBuilder().setId(id).setCap("dependency")
+                .setConditionInfo("dependency:\n  name: org.example.anything\n").build(), capture(eval));
+
+        assertThat(eval.get().getSuccessful()).isTrue();
+        assertThat(eval.get().getResponse().getMatched()).isFalse();
+    }
+
+    @Test
+    void malformedConditionInfoReturnsErrorNotCrash() {
+        JavaProviderService svc = new JavaProviderService(10);
+        long id = initSourceDir(svc);
+
+        AtomicReference<EvaluateResponse> eval = new AtomicReference<>();
+        svc.evaluate(EvaluateRequest.newBuilder().setId(id).setCap("referenced")
+                .setConditionInfo("referenced: [this is : not valid yaml").build(), capture(eval));
+
+        assertThat(eval.get()).as("malformed conditionInfo must not crash").isNotNull();
+        assertThat(eval.get().getSuccessful()).isFalse();
+    }
+
+    @Test
+    void unknownCapabilityReturnsUnmatched() {
+        JavaProviderService svc = new JavaProviderService(10);
+        long id = initSourceDir(svc);
+
+        AtomicReference<EvaluateResponse> eval = new AtomicReference<>();
+        svc.evaluate(EvaluateRequest.newBuilder().setId(id).setCap("bogus-capability")
+                .setConditionInfo("whatever:\n").build(), capture(eval));
+
+        assertThat(eval.get().getSuccessful()).isTrue();
+        assertThat(eval.get().getResponse().getMatched()).isFalse();
+    }
+
+    /** Init a minimal source-only workspace (no build file) and return its id. */
+    private long initSourceDir(JavaProviderService svc) {
+        try {
+            Path src = tempDir.resolve("app/com/example");
+            Files.createDirectories(src);
+            Files.writeString(src.resolve("A.java"), "package com.example; public class A {}");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        AtomicReference<InitResponse> ref = new AtomicReference<>();
+        svc.init(Config.newBuilder().setLocation(tempDir.resolve("app").toString())
+                .setAnalysisMode("source-only").build(), capture(ref));
+        return ref.get().getId();
+    }
+
     private static <T> StreamObserver<T> capture(AtomicReference<T> ref) {
         return new StreamObserver<>() {
             @Override public void onNext(T value) { ref.set(value); }
