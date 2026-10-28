@@ -97,6 +97,10 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
 - **Empty rulesets:** ignored (koncur already filters them).
 
 ### L5 — Non-functional / production-readiness
+> Procedures, how-to-run, and measured baselines live in [`testing/PERFORMANCE.md`](testing/PERFORMANCE.md).
+> Status: lifecycle/leak (Stop temp-dir cleanup) and concurrency are implemented + gated; a perf
+> micro-benchmark + baseline exist (advisory); soak is planned.
+
 - **Resource lifecycle & leaks:** `Stop` must remove the workspace *and* clean temp dirs
   (`java-provider-mvn-*`, `~/.java-provider-work/`, `java-project/`). Run many Init/Stop cycles; watch
   RSS + disk.
