@@ -66,10 +66,11 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
         LOG.info("Init workspace id={} location={} mode={}", id, location, analysisMode);
 
         try {
+            Path mvnWorkDir = null;
             if (MavenArtifactDownloader.isMvnUri(location)) {
                 MavenArtifactDownloader downloader = new MavenArtifactDownloader();
-                Path workDir = Path.of(System.getProperty("java.io.tmpdir"), "java-provider-mvn-" + id);
-                Path downloaded = downloader.download(location, workDir);
+                mvnWorkDir = Path.of(System.getProperty("java.io.tmpdir"), "java-provider-mvn-" + id);
+                Path downloaded = downloader.download(location, mvnWorkDir);
                 location = downloaded.toString();
                 LOG.info("Downloaded mvn artifact to {}", location);
             }
@@ -79,6 +80,9 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
             configureEncoding(request);
 
             WorkspaceContext ctx = new WorkspaceContext(id, location, analysisMode, request, contextLines);
+            if (mvnWorkDir != null) {
+                ctx.trackTempDir(mvnWorkDir);
+            }
             ctx.index();
             workspaces.put(id, ctx);
 
@@ -146,6 +150,7 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
         long id = request.getId();
         WorkspaceContext ctx = workspaces.remove(id);
         if (ctx != null) {
+            ctx.cleanup();
             LOG.info("Stopped workspace id={}", id);
         }
         responseObserver.onNext(Empty.getDefaultInstance());

@@ -49,6 +49,9 @@ public class WorkspaceContext {
     private List<BuildTool.DagEntry> resolvedDag;
     private Path archiveProjectDir;
     private volatile CompletableFuture<Void> depResolutionFuture;
+    // Temp dirs this workspace created; deleted by cleanup() on Stop so a long-lived provider
+    // doesn't leak disk across Init/Stop cycles.
+    private final List<Path> tempDirs = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public WorkspaceContext(long id, String location, String analysisMode, Config config, int contextLines) {
         this.id = id;
@@ -195,6 +198,7 @@ public class WorkspaceContext {
             archiveProjectDir = Files.createTempDirectory("java-project-");
         }
         Files.createDirectories(archiveProjectDir);
+        tempDirs.add(archiveProjectDir);
 
         var decompiler = new VineflowerDecompiler();
         var handler = new ArchiveHandler(decompiler);
@@ -225,6 +229,7 @@ public class WorkspaceContext {
             }
 
             Path depWorkDir = Path.of(System.getProperty("user.home"), ".java-provider-work", String.valueOf(id));
+            tempDirs.add(depWorkDir);
             DependencyResolver resolver = new DependencyResolver(decompiler);
             try {
                 DependencyResolver.ResolveResult depResult = resolver.resolve(resolvedDeps, depWorkDir);
@@ -290,6 +295,7 @@ public class WorkspaceContext {
         // Place work dir outside the source tree so the engine's file-discovery rules
         // don't pick up decompiled dependency sources as application files
         Path workDir = Path.of(System.getProperty("user.home"), ".java-provider-work", String.valueOf(id));
+        tempDirs.add(workDir);
         try {
             DependencyResolver.ResolveResult result = resolver.resolve(resolvedDeps, workDir);
             if (!result.sourceDirs().isEmpty()) {
@@ -761,5 +767,42 @@ public class WorkspaceContext {
     public List<BuildTool.ResolvedDependency> getResolvedDeps() {
         awaitDependencyResolution();
         return resolvedDeps != null ? resolvedDeps : List.of();
+    }
+
+    /** Registers an extra temp dir (e.g. an mvn:// download) to be removed on {@link #cleanup()}. */
+    public void trackTempDir(Path dir) {
+        if (dir != null) {
+            tempDirs.add(dir);
+        }
+    }
+
+    /**
+     * Releases this workspace's on-disk resources: recursively deletes every temp dir it created.
+     * Called on Stop so a long-lived provider does not leak disk across Init/Stop cycles. Best-effort;
+     * waits for any in-flight dependency resolution first to avoid deleting under it.
+     */
+    public void cleanup() {
+        awaitDependencyResolution();
+        for (Path dir : tempDirs) {
+            deleteRecursively(dir);
+        }
+        tempDirs.clear();
+    }
+
+    private static void deleteRecursively(Path dir) {
+        if (dir == null || !Files.exists(dir)) {
+            return;
+        }
+        try (var walk = Files.walk(dir)) {
+            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException e) {
+                    LOG.debug("Could not delete {}: {}", p, e.getMessage());
+                }
+            });
+        } catch (IOException e) {
+            LOG.warn("Failed to clean temp dir {}: {}", dir, e.getMessage());
+        }
     }
 }
