@@ -251,10 +251,12 @@ unexplained, and every call we made is there for anyone to review.
 
 Real gap — JDTLS has incremental compilation + caching; we parse fresh. **But:**
 
-- **92% of wall time is rule evaluation** — the provider isn't the bottleneck
-- **96% of evaluate calls finish <10ms**; provider-side tuning netted **~0s**
-- Dominant cost is **engine-side**: multi-condition OR rules run branches **sequentially**.
-  The biggest win — **parallel OR conditions** — is an engine change that **helps both providers**.
+- **92% of wall time is rule evaluation** — but the provider's **matching** isn't the lever:
+  **96% of calls finish <10ms**, and speeding up its queries netted **~0s**
+- Dominant cost is **engine-side**: multi-condition OR rules run branches **sequentially** (one blocking
+  call each) → the big win is **parallel OR conditions** (an engine change — helps both providers)
+- The few slow calls are **dependency rules** waiting on our one-time background dependency resolution,
+  not per-query matching
 
 ---
 

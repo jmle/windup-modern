@@ -169,10 +169,11 @@ Same benchmark (`RESOURCE_COMPARISON.md` / `OPTIMIZATIONS.md`):
 
 Why — and why it's narrower than it looks:
 - JDTLS is a mature LS with **incremental compilation and caching**; we parse fresh. Real gap, no spin.
-- But **92% of wall time is rule evaluation**, and the provider is *not* the bottleneck: **96% of evaluate calls finish in <10ms**. Provider-side query optimizations we tried netted **~0s** (`OPTIMIZATIONS.md` §2).
+- **92% of wall time is rule evaluation**, but the provider's **matching query path is not the lever**: **96% of the ~592 evaluate calls finish in <10ms**, and speeding up the provider's queries (hash lookups, caching) netted **~0s** (`OPTIMIZATIONS.md` §2).
 - The dominant cost is **engine-side**: multi-condition OR rules evaluate branches **sequentially** (one blocking gRPC call each). The single biggest remaining win — **parallel OR conditions** — is an `analyzer-lsp` change that **benefits both providers**.
+- The handful of slow calls (1–5s) are **dependency rules**, where the first call waits on our **one-time background dependency resolution** (Maven/Aether) to finish — a setup cost, not per-query matching.
 
-*Talking point:* We're honest that we're slower today. But the gap is largely cold-start/parse efficiency, not the hot path, and the biggest lever is in the engine, not the provider.
+*Talking point:* We're honest that we're slower today. But it's cold-start/parse cost plus engine orchestration — the provider's *matching* path is already fast, so the biggest lever is in the engine, not the provider.
 
 ---
 
