@@ -39,6 +39,11 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
         this.codeSnipService = codeSnipService;
     }
 
+    /** Number of live workspaces (should return to 0 after every Init is matched by a Stop). */
+    public int activeWorkspaces() {
+        return workspaces.size();
+    }
+
     @Override
     public void capabilities(Empty request, StreamObserver<CapabilitiesResponse> responseObserver) {
         Capability referenced = Capability.newBuilder()
