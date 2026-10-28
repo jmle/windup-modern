@@ -63,6 +63,7 @@ memory-leak, resilience); see `TEST_PLAN.md` exit criteria.
 | `CASE_FOR_JAVA_PROVIDER.md` + `slides/` | The case for switching (written + deck) |
 | `TEST_PLAN.md` | Layered testing strategy + exit criteria |
 | `testing/DIFFERENTIAL_HARNESS.md` | How the differential gate works |
+| `testing/PERFORMANCE.md` | Perf / robustness procedures + measured baselines |
 | `testing/koncur-parity-ledger.yaml` | Tracked record of every known provider-vs-Go difference |
 | `LOCATION_DIFFERENCES.md` | Per-`location` matching behavior vs the Go provider |
 | `RESOURCE_COMPARISON.md`, `OPTIMIZATIONS.md` | Footprint and performance analysis |
