@@ -80,14 +80,23 @@ evaluate calls finish <10ms; speeding up queries netted ~0s); the dominant cost 
 OR-branch evaluation, and the few slow calls are dependency rules awaiting the one-time background
 dependency resolution.
 
-## Phase 4 — Soak / stress (planned)
+## Phase 4 — Soak / leak (nightly)
 
-**Goal:** catch slow leaks the unit tests can't — run the provider process over **many** Init/Stop cycles
-and/or a large monorepo, tracking **process RSS, open file descriptors, thread count, and disk** over
-time (process-level RSS matters because JDT uses off-heap/native memory that JVM-heap checks miss).
+**What:** catch slow leaks the single-cycle tests can't — churn **many** Init → evaluate → Stop cycles
+through **one long-lived `JavaProviderService`** (as a Hub-hosted provider does, app after app) and assert
+nothing leaks, while tracking the heap/RSS/thread trend. Process RSS is read from `/proc/self/status`
+(includes JDT's off-heap/native memory that a JVM-heap check misses).
 
-**Plan:** a nightly workflow (like the differential) that drives the provider via gRPC in a loop and
-samples `/proc/<pid>/status` + disk usage, failing on sustained upward drift. Not yet implemented.
+**Test:** `SoakTest` (opt-in). **Hard gates:** workspace registry returns to 0, thread count stays
+bounded, heap does not climb without bound. **Advisory:** heap/RSS/thread trend written to
+`target/soak-report.txt`.
+
+**Run:** `mvn -Dsoak=true -Dtest=SoakTest test` (tune `-Dsoak.cycles=500`).
+**CI:** `.github/workflows/soak.yaml` — nightly + manual.
+
+**Result** (150 cycles, 100-file corpus, local JDK 21): no leak — heap flat ~10 MB, threads flat at 9,
+live workspaces 0 throughout; RSS crept 184→212 MB (bounded, native/JIT warm-up). Confirms the Phase-1
+`Stop` cleanup holds under churn.
 
 ## Summary of gates
 
@@ -96,4 +105,5 @@ samples `/proc/<pid>/status` + disk usage, failing on sustained upward drift. No
 | Temp-dir cleanup on Stop / no accumulation | **hard** (per-PR) |
 | Concurrency correctness / no deadlock | **hard** (per-PR) |
 | Index/query latency, memory | advisory (run on demand / nightly trend) |
-| Process RSS/FD/disk over a soak | advisory → alert on drift (planned) |
+| Soak: workspace registry / threads / heap bounded over many cycles | **hard** (nightly) |
+| Soak: heap/RSS/thread trend | advisory (nightly report) |
