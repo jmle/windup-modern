@@ -157,4 +157,43 @@ class GradleBuildToolTest {
         }
         return subprojects;
     }
+
+    // ── dependency parsing (parity: group:name:selected-version, direct vs transitive) ──
+
+    private BuildTool.ResolvedDependency find(List<BuildTool.DagEntry> deps, String artifactId) {
+        return deps.stream().map(BuildTool.DagEntry::dep)
+                .filter(d -> d.artifactId().equals(artifactId)).findFirst().orElse(null);
+    }
+
+    @Test
+    void parsesResolvedTaskOutput() {
+        List<BuildTool.DagEntry> deps = new GradleBuildTool().parseDependencyTree(List.of(
+                "RESOLVED: org.slf4j:slf4j-api:2.0.13",
+                "RESOLVED: com.google.guava:guava:32.0.0-jre",
+                "noise line, ignored"), tempDir, "build.gradle");
+
+        assertThat(deps).hasSize(2);
+        assertThat(find(deps, "slf4j-api").version()).isEqualTo("2.0.13");
+        assertThat(find(deps, "guava").version()).isEqualTo("32.0.0-jre");
+        assertThat(find(deps, "slf4j-api").indirect()).isFalse();
+    }
+
+    @Test
+    void parsesDependencyTreeWithConflictResolutionAndTransitives() {
+        List<BuildTool.DagEntry> deps = new GradleBuildTool().parseDependencyTree(List.of(
+                "compileClasspath - Compile classpath for source set 'main'.",
+                "+--- org.slf4j:slf4j-api:2.0.13",
+                "+--- com.google.guava:guava:31.0 -> 32.0.0-jre",
+                "|    \\--- com.google.code.findbugs:jsr305:3.0.2",
+                "\\--- org.example:lib:1.0"), tempDir, "build.gradle");
+
+        // conflict resolution: SELECTED version wins
+        assertThat(find(deps, "guava").version()).isEqualTo("32.0.0-jre");
+        // transitive (indented under '|') is marked indirect
+        assertThat(find(deps, "jsr305").indirect()).isTrue();
+        // a top-level '\--- ' entry is still a DIRECT dependency, not transitive
+        assertThat(find(deps, "lib")).isNotNull();
+        assertThat(find(deps, "lib").indirect()).isFalse();
+        assertThat(find(deps, "slf4j-api").indirect()).isFalse();
+    }
 }
