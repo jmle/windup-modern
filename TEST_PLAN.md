@@ -31,11 +31,12 @@ Therefore koncur is **necessary but not sufficient**. This plan layers independe
 
 ### L1 — Unit / index (fast, deterministic, in-repo)
 Already present: `SymbolIndexTest`, `SymbolCollectorTest`-style coverage, `MavenShaIndexTest`, etc.
+- gRPC contract tests: happy paths in `GrpcIntegrationTest`; error/degradation paths in
+  `GrpcContractErrorPathTest` — unknown workspace id on every data RPC, malformed `conditionInfo`,
+  unknown capability, Init failure (no workspace leak), idempotent `Stop`, no-op stubs (MTA-8156).
+- **Concurrency/thread-safety:** `WorkspaceConcurrencyTest` fires concurrent `Evaluate` calls at one
+  workspace (`ThreadLocal<Yaml>` + pattern cache).
 Gaps to fill:
-- gRPC contract tests for **every RPC incl. error paths**: unknown workspace id, malformed
-  `conditionInfo`, empty results, Init failure, Stop cleanup.
-- **Concurrency/thread-safety**: the engine's 10-worker pool fires concurrent `Evaluate` calls at one
-  workspace (`ThreadLocal<Yaml>` + pattern cache). Load-test it.
 - **Glob→regex** property/fuzz tests.
 
 ### L2 — Synthetic location/condition matrix (provider-independent oracle) ⭐
