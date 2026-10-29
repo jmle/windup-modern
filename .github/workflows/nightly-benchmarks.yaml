@@ -1,0 +1,73 @@
+name: Nightly Benchmarks (perf + soak)
+
+# Heavy / noisy non-functional tests that don't belong on the per-PR gate (MTA-8157):
+#   - perf: symbol-index micro-benchmark (index time / heap / query latency)
+#   - soak: many Init -> evaluate -> Stop cycles through one long-lived provider; assert no leak
+# Both are opt-in in the suite (-Dperf / -Dsoak) and run here nightly + on demand.
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+    inputs:
+      cycles:
+        description: "Soak Init/Stop cycles"
+        default: "500"
+        required: false
+
+jobs:
+  perf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+      - name: Run perf micro-benchmark
+        run: mvn -B -Dperf=true -Dtest=PerfBenchmarkTest test
+      - name: Perf report to summary
+        if: always()
+        run: |
+          if [ -f target/perf-report.txt ]; then
+            { echo '```'; cat target/perf-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload perf report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-report
+          path: target/perf-report.txt
+          retention-days: 14
+
+  soak:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+      - name: Run soak test
+        run: mvn -B -Dsoak=true -Dsoak.cycles=${{ github.event.inputs.cycles || '500' }} -Dtest=SoakTest test
+      - name: Soak report to summary
+        if: always()
+        run: |
+          if [ -f target/soak-report.txt ]; then
+            { echo '```'; cat target/soak-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload soak report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-report
+          path: target/soak-report.txt
+          retention-days: 14

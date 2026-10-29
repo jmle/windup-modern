@@ -49,6 +49,9 @@ mvn -Dperf=true -Dtest=PerfBenchmarkTest test
 # results printed and written to target/perf-report.txt
 ```
 
+**CI:** `.github/workflows/nightly-benchmarks.yaml` (`perf` job) runs this nightly + on demand and uploads
+the report, so the baseline is tracked over time (advisory — not a per-PR gate).
+
 **Baseline** (local dev machine, JDK 21 — *indicative, for trend not absolute gating*):
 
 | Metric | Value |
@@ -92,7 +95,7 @@ bounded, heap does not climb without bound. **Advisory:** heap/RSS/thread trend 
 `target/soak-report.txt`.
 
 **Run:** `mvn -Dsoak=true -Dtest=SoakTest test` (tune `-Dsoak.cycles=500`).
-**CI:** `.github/workflows/soak.yaml` — nightly + manual.
+**CI:** `.github/workflows/nightly-benchmarks.yaml` (`soak` job) — nightly + manual.
 
 **Result** (150 cycles, 100-file corpus, local JDK 21): no leak — heap flat ~10 MB, threads flat at 9,
 live workspaces 0 throughout; RSS crept 184→212 MB (bounded, native/JIT warm-up). Confirms the Phase-1
@@ -104,6 +107,6 @@ live workspaces 0 throughout; RSS crept 184→212 MB (bounded, native/JIT warm-u
 |---|---|
 | Temp-dir cleanup on Stop / no accumulation | **hard** (per-PR) |
 | Concurrency correctness / no deadlock | **hard** (per-PR) |
-| Index/query latency, memory | advisory (run on demand / nightly trend) |
+| Index/query latency, memory | advisory (nightly trend — `nightly-benchmarks.yaml`) |
 | Soak: workspace registry / threads / heap bounded over many cycles | **hard** (nightly) |
 | Soak: heap/RSS/thread trend | advisory (nightly report) |
