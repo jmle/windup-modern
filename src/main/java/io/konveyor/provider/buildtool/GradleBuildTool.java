@@ -197,7 +197,7 @@ public class GradleBuildTool implements BuildTool {
         }
     }
 
-    void downloadSources(Path projectDir) {
+    public void downloadSources(Path projectDir) {
         Path buildFile = findBuildFile(projectDir);
         if (!Files.exists(buildFile)) return;
 
