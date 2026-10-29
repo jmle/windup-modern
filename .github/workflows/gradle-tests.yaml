@@ -1,0 +1,55 @@
+name: Gradle Tests
+
+# Exercises the version-aware Gradle code paths (dependency resolution + dependency-SOURCE download,
+# MTA-8217) against real Gradle installs. These tests are gated on `gradle` being on PATH (@EnabledIf
+# "gradleAvailable"), so in the plain Unit Tests workflow they skip. Here we install Gradle explicitly
+# and run them across a <9 and a 9+ version to cover BOTH script variants:
+#   - 7.6.x -> isGradle9OrLater == false -> RESOLVE_DEPS_V8 / DOWNLOAD_SOURCES_V8 (project.buildDir)
+#   - 9.x   -> isGradle9OrLater == true  -> RESOLVE_DEPS_V9 / DOWNLOAD_SOURCES_V9 (layout.buildDirectory)
+#
+# Java 17 is the single JDK that satisfies all three constraints at once: Gradle 7.6 supports Java
+# 8-19, Gradle 9 requires Java 17+, and the Maven build targets release 17.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  gradle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gradle-version: '7.6.4'   # V8 path (Gradle <9)
+          - gradle-version: '9.0.0'   # V9 path (Gradle 9+)
+    name: gradle ${{ matrix.gradle-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Set up Gradle ${{ matrix.gradle-version }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ matrix.gradle-version }}
+
+      - name: Verify Gradle on PATH
+        run: gradle --version
+
+      - name: Run gated Gradle tests
+        run: >-
+          mvn -B
+          -Dtest=GradleResolutionTest,GradleSourceResolutionTest
+          -Dsurefire.failIfNoTests=false
+          test
