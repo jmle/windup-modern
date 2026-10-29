@@ -41,11 +41,12 @@ Gaps to fill:
 ### L2 — Synthetic location/condition matrix (provider-independent oracle) ⭐
 A self-contained fixture corpus where the correct matches are known **by construction**, driven through
 the real `referenced` **evaluate** path (YAML condition → incidents), not compared to Go.
-- Scaffolded: `src/test/java/io/konveyor/provider/index/LocationCoverageTest.java`.
-- Covers every `location`: TYPE, IMPORT, ANNOTATION, INHERITANCE, IMPLEMENTS_TYPE, METHOD_CALL,
-  CONSTRUCTOR_CALL, RETURN_TYPE, FIELD, METHOD, VARIABLE_DECLARATION, ENUM, PACKAGE, and default.
-- Extend with: `annotated` elements, `filepaths` filtering, dependency-vs-application incident flag,
-  glob variants. Turn each row of `LOCATION_DIFFERENCES.md` into a case.
+- `LocationCoverageTest` — every `location`: TYPE, IMPORT, ANNOTATION, INHERITANCE, IMPLEMENTS_TYPE,
+  METHOD_CALL, CONSTRUCTOR_CALL, RETURN_TYPE, FIELD, METHOD, VARIABLE_DECLARATION, ENUM, PACKAGE, default.
+- `ReferencedConditionsTest` — the rest of the `referenced` surface: `annotated` (presence + element
+  values, incl. regex matching + negatives), `filepaths` filtering (include/exclude), glob (wildcard,
+  alternation `(a|b)`, suffix), and the method-with-return-type form.
+- `DependencyIncidentTest` — the dependency-vs-application incident flag (`IsDependencyIncident`).
 - This is the highest-value oracle: deterministic, independent of both providers, catches gaps
   (default-location breadth, etc.) without kantra.
 
