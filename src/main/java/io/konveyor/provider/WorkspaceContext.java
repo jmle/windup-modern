@@ -8,6 +8,7 @@ import io.konveyor.provider.buildtool.BuildToolDetector;
 import io.konveyor.provider.buildtool.DependencyCache;
 import io.konveyor.provider.buildtool.DependencyLabeler;
 import io.konveyor.provider.buildtool.DependencyResolver;
+import io.konveyor.provider.buildtool.GradleBuildTool;
 import io.konveyor.provider.decompiler.ArchiveHandler;
 import io.konveyor.provider.decompiler.VineflowerDecompiler;
 import io.konveyor.provider.grpc.*;
@@ -286,18 +287,26 @@ public class WorkspaceContext {
     private void resolveDependencySources(Path projectDir) {
         DependencyResolver resolver = new DependencyResolver();
 
-        if (buildTool.getType() == BuildTool.Type.MAVEN) {
-            resolver.downloadSourceJars(resolvedDeps);
-            resolvedDag = buildTool.getDependenciesDAG(projectDir);
-            resolvedDeps = BuildTool.flattenDag(resolvedDag);
-        }
-
         // Place work dir outside the source tree so the engine's file-discovery rules
         // don't pick up decompiled dependency sources as application files
         Path workDir = Path.of(System.getProperty("user.home"), ".java-provider-work", String.valueOf(id));
         tempDirs.add(workDir);
         try {
-            DependencyResolver.ResolveResult result = resolver.resolve(resolvedDeps, workDir);
+            DependencyResolver.ResolveResult result;
+            if (buildTool.getType() == BuildTool.Type.GRADLE && buildTool instanceof GradleBuildTool gradle) {
+                // Fetch dependency source JARs via the version-aware Gradle task (Gradle <9 vs 9+), then
+                // extract + index them, decompiling any whose sources Gradle couldn't fetch.
+                gradle.downloadSources(projectDir);
+                Path downloads = projectDir.resolve("build").resolve("downloads");
+                result = resolver.resolveFromDownloadedSources(resolvedDeps, downloads, workDir);
+            } else {
+                if (buildTool.getType() == BuildTool.Type.MAVEN) {
+                    resolver.downloadSourceJars(resolvedDeps);
+                    resolvedDag = buildTool.getDependenciesDAG(projectDir);
+                    resolvedDeps = BuildTool.flattenDag(resolvedDag);
+                }
+                result = resolver.resolve(resolvedDeps, workDir);
+            }
             if (!result.sourceDirs().isEmpty()) {
                 indexDependencySources(result.sourceDirs());
                 LOG.info("Indexed {} dependency source directories ({} decompiled)",

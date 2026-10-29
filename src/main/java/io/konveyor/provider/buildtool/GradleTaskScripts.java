@@ -77,7 +77,10 @@ final class GradleTaskScripts {
                                 srcConf.transitive = false
                                 try {
                                     def files = srcConf.resolve()
-                                    files.each { f -> f.renameTo(new File(downloadDir, f.name)) }
+                                    files.each { f ->
+                                        def dest = new File(downloadDir, f.name)
+                                        if (!dest.exists()) dest.bytes = f.bytes  // copy (renameTo fails from the cache)
+                                    }
                                     println "Found ${files.size()} sources for ${mid.group}:${mid.name}:${mid.version}"
                                 } catch (Exception e) {
                                     println "Found 0 sources for ${mid.group}:${mid.name}:${mid.version}"
@@ -110,7 +113,8 @@ final class GradleTaskScripts {
             }
             task konveyorDownloadSources {
                 doLast {
-                    def downloadDir = new File(project.buildDir, "downloads")
+                    // Gradle 9 removed project.buildDir; use the layout API.
+                    def downloadDir = new File(project.layout.buildDirectory.get().asFile, "downloads")
                     downloadDir.mkdirs()
                     sourceTargets.unique().each { t ->
                         def srcDep = project.dependencies.create("${t.group}:${t.name}:${t.version}:sources@jar")
@@ -120,7 +124,7 @@ final class GradleTaskScripts {
                             def files = srcConf.resolve()
                             files.each { f ->
                                 def dest = new File(downloadDir, f.name)
-                                if (!dest.exists()) f.renameTo(dest)
+                                if (!dest.exists()) dest.bytes = f.bytes  // copy (renameTo fails from the cache)
                             }
                             println "Found ${files.size()} sources for ${t.group}:${t.name}:${t.version}"
                         } catch (Exception e) {

@@ -92,6 +92,57 @@ public class DependencyResolver {
     }
 
     /**
+     * Resolves dependency sources for Gradle: the {@code konveyorDownloadSources} task fetches
+     * {@code <artifact>-<version>-sources.jar} files into {@code sourceJarDir} (Gradle's
+     * {@code build/downloads}), flat rather than next to the cached binary. For each dependency, extract
+     * its source JAR if present there; otherwise decompile the binary JAR (the fallback for artifacts
+     * whose sources Gradle couldn't fetch).
+     */
+    public ResolveResult resolveFromDownloadedSources(List<BuildTool.ResolvedDependency> deps,
+                                                       Path sourceJarDir, Path workDir) {
+        Path decompiledDir = workDir.resolve("decompiled-deps");
+        Path sourcesDir = workDir.resolve("extracted-sources");
+
+        List<Path> sourceDirs = new ArrayList<>();
+        List<Path> jarsToDecompile = new ArrayList<>();
+
+        for (BuildTool.ResolvedDependency dep : deps) {
+            Path sourceJar = dep.version() != null
+                    ? sourceJarDir.resolve(dep.artifactId() + "-" + dep.version() + "-sources.jar")
+                    : null;
+
+            if (sourceJar != null && Files.exists(sourceJar)) {
+                Path extractDir = sourcesDir.resolve(dep.artifactId() + "-" + dep.version());
+                try {
+                    extractSourceJar(sourceJar, extractDir);
+                    sourceDirs.add(extractDir);
+                    LOG.debug("Extracted Gradle sources for {}:{}", dep.groupId(), dep.artifactId());
+                    continue;
+                } catch (IOException e) {
+                    LOG.warn("Failed to extract Gradle source JAR {}, will decompile binary", sourceJar);
+                }
+            }
+
+            if (dep.jarPath() != null && Files.exists(dep.jarPath())) {
+                jarsToDecompile.add(dep.jarPath());
+            }
+        }
+
+        if (!jarsToDecompile.isEmpty()) {
+            LOG.info("Decompiling {} Gradle dependency JARs without sources", jarsToDecompile.size());
+            for (DecompileResult result : decompiler.decompileJars(jarsToDecompile, decompiledDir)) {
+                if (result.hasOutput()) {
+                    sourceDirs.add(result.outputDir());
+                }
+            }
+        }
+
+        LOG.info("Gradle dependency sources: {} source dirs from {} dependencies ({} decompiled)",
+                sourceDirs.size(), deps.size(), jarsToDecompile.size());
+        return new ResolveResult(sourceDirs, jarsToDecompile.size());
+    }
+
+    /**
      * Downloads source JARs for dependencies that don't already have them,
      * using the Maven Resolver API in-process (no external mvn binary needed).
      */
