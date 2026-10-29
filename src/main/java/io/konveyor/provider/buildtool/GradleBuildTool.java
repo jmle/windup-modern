@@ -71,24 +71,37 @@ public class GradleBuildTool implements BuildTool {
         return allDeps;
     }
 
-    private List<DagEntry> parseDependencyTree(List<String> output, Path localRepo, String buildFileUri) {
+    // Gradle conflict resolution in `dependencies` output: "g:n:1.0 -> 2.0" means 2.0 was selected.
+    private static final Pattern SELECTED_VERSION = Pattern.compile("->\\s*([\\w.\\-]+)");
+
+    List<DagEntry> parseDependencyTree(List<String> output, Path localRepo, String buildFileUri) {
         List<DagEntry> deps = new ArrayList<>();
         for (String line : output) {
             Matcher m = DEP_LINE.matcher(line);
-            if (m.find()) {
-                String groupId = m.group(1);
-                String artifactId = m.group(2);
-                String version = m.group(3);
-
-                Path jarPath = resolveGradleJarPath(localRepo, groupId, artifactId, version);
-                boolean hasSource = jarPath != null && hasSourceJar(localRepo, groupId, artifactId, version);
-                boolean indirect = line.contains("|") || line.contains("\\");
-
-                ResolvedDependency dep = new ResolvedDependency(
-                        groupId, artifactId, version, null, "compile",
-                        jarPath, hasSource, indirect, buildFileUri);
-                deps.add(new DagEntry(dep, List.of()));
+            if (!m.find()) {
+                continue;
             }
+            String groupId = m.group(1);
+            String artifactId = m.group(2);
+            String version = m.group(3);
+
+            // Honor Gradle's conflict resolution: use the SELECTED version after "->", not the requested.
+            Matcher sel = SELECTED_VERSION.matcher(line.substring(m.end()));
+            if (sel.find()) {
+                version = sel.group(1);
+            }
+
+            // Transitive deps are indented (prefixed with '|' or spaces); top-level '+---'/'\---' entries
+            // and flat "RESOLVED:" task lines start at column 0. (A top-level '\--- ' is still direct.)
+            boolean indirect = !line.isEmpty() && (line.charAt(0) == '|' || line.charAt(0) == ' ');
+
+            Path jarPath = resolveGradleJarPath(localRepo, groupId, artifactId, version);
+            boolean hasSource = jarPath != null && hasSourceJar(localRepo, groupId, artifactId, version);
+
+            ResolvedDependency dep = new ResolvedDependency(
+                    groupId, artifactId, version, null, "compile",
+                    jarPath, hasSource, indirect, buildFileUri);
+            deps.add(new DagEntry(dep, List.of()));
         }
         return deps;
     }
