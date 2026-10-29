@@ -56,6 +56,10 @@ Don't compare deps to Go. Compare `GetDependencies` / `GetDependenciesDAG` again
 - **Gradle `dependencies` task** (Groovy + Kotlin DSL).
 Also test: source-JAR download + decompilation fallback, open-source labeler, version bounds,
 offline/proxy/private-repo.
+Status: Maven/BOM resolution validated vs `mvn dependency:tree` (MTA-8155). Gradle resolution + dependency-source
+download validated vs Gradle oracles (`GradleResolutionTest`, `GradleSourceResolutionTest`, MTA-8217), gated on
+`gradle` being on PATH and run in CI across the V8 (<9, `project.buildDir`) and V9 (9+, `layout.buildDirectory`)
+script paths. Still to cover: Kotlin-DSL (`build.gradle.kts`) projects and offline/proxy/private-repo.
 
 ### L4 — Differential E2E (koncur, ledger-driven)
 We trust vanilla koncur `main`'s goldens as the **system of record for the Go provider's output**
@@ -101,7 +105,8 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
 > Status: lifecycle/leak (Stop temp-dir cleanup), concurrency, and resilience/security (zip-slip rejection,
 > graceful handling of corrupt archives / missing locations / malformed Java — `ArchiveSafetyTest`,
 > `ResilienceTest`) are implemented + gated; a perf micro-benchmark + baseline exist (advisory); soak is
-> planned.
+> implemented (`SoakTest`) and runs nightly via `soak.yaml`. Remaining: promote perf from advisory to a
+> hard CI gate.
 
 - **Resource lifecycle & leaks:** `Stop` must remove the workspace *and* clean temp dirs
   (`java-provider-mvn-*`, `~/.java-provider-work/`, `java-project/`). Run many Init/Stop cycles; watch
@@ -128,22 +133,29 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
       need L2/L4 to actually prove correctness).
 - [ ] **Pin** kantra, ruleset/analyzer-lsp, and both provider image tags; record them per run.
 - [ ] Regenerate Go baselines at **current** rules; re-run and re-triage `FAILING_TESTS.md`.
-- [ ] Expand beyond the ~17 apps; add missing **Gradle**, **binary/`mvn://`**, and **full-mode** coverage.
+- [~] Expand beyond the ~17 apps; add missing **Gradle**, **binary/`mvn://`**, and **full-mode** coverage.
+      *Gradle resolution + source download now covered by dedicated gated tests + CI (MTA-8217); binary/`mvn://`
+      and full-mode corpus expansion still pending (MTA-8159 compatibility matrix).*
 
 ---
 
 ## Process (current)
 - **Per PR:** `unit-tests.yaml` — L1 (JUnit, incl. the L2 synthetic oracle) + the triage-harness tests. Fast.
+  `gradle-tests.yaml` installs real Gradle and runs the gated L3 Gradle tests across a 7.6.x (V8) and a 9.x
+  (V9) matrix, so both version-aware script variants are exercised every PR.
 - **Nightly + on demand:** `koncur-differential.yaml` — full differential corpus vs koncur `main`, **gating**
-  (see `testing/DIFFERENTIAL_HARNESS.md`). L3/L5 (dependency/Gradle, perf, soak) still to be added here.
+  (see `testing/DIFFERENTIAL_HARNESS.md`). `soak.yaml` runs the L5 soak/leak cycles nightly. Remaining to wire
+  into the nightly: a perf-regression gate (MTA-8157/8160).
 - **Shadow/canary:** run Java provider alongside Go on real analyses and diff *before* flipping default.
 - The stale forked-baseline `koncur-e2e` PR job has been **retired** (MTA-8152).
 
 ## Exit criteria for the switch
 - [x] Zero **bucket-(b)** correctness regressions across the corpus — *first differential run: 0 unexplained, 0 regressions.*
-- [~] Dependency parity vs Maven/Gradle — *Maven/BOM done + parity test; **Gradle still to validate**.*
+- [x] Dependency parity vs Maven/Gradle — *Maven/BOM resolution + parity test (MTA-8155); Gradle resolution AND
+      dependency-source download validated vs Gradle oracles (MTA-8217), run in CI across the V8 (<9) and V9 (9+)
+      script paths by `gradle-tests.yaml`.*
 - [~] All `location` types + `referenced`/`dependency` features covered by the L2 synthetic oracle — *core locations covered; extend `annotated`/`filepaths`/dependency.*
-- [ ] Perf within bounds of `RESOURCE_COMPARISON.md`; no CI perf regression — *not started (MTA-8157).*
-- [ ] Soak/leak test clean (RSS + disk stable over N Init/Stop cycles) — *not started (MTA-8157).*
-- [ ] Works via Tackle Hub in-cluster (production path) — *CLI proven; hub pending (MTA-8159).*
+- [~] Perf within bounds of `RESOURCE_COMPARISON.md`; no CI perf regression — *advisory micro-benchmark + baseline exist (`PerfBenchmarkTest`); no hard CI perf gate yet (MTA-8157/8160).*
+- [x] Soak/leak test clean (RSS + disk stable over N Init/Stop cycles) — *`SoakTest` + nightly `soak.yaml`; Stop temp-dir cleanup fixed (MTA-8157).*
+- [~] Works via Tackle Hub in-cluster (production path) — *CLI proven; hub e2e workflow (`koncur-hub-e2e.yaml`) wired, compatibility matrix pending (MTA-8159).*
 - [ ] Parity ledger reviewed and signed off.
