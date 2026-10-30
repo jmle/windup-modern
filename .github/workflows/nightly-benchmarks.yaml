@@ -28,8 +28,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
-      - name: Run perf micro-benchmark
-        run: mvn -B -Dperf=true -Dtest=PerfBenchmarkTest test
+      - name: Run perf micro-benchmark (with gross-regression gate)
+        # perf.gate=true asserts the metrics stay under generous ceilings (several times the local
+        # baseline), so this fails the nightly only on an order-of-magnitude / algorithmic regression,
+        # not on CI noise. Tune ceilings via -Dperf.budget.msPerFile / .p95Us / .heapMb if runners drift.
+        run: mvn -B -Dperf=true -Dperf.gate=true -Dtest=PerfBenchmarkTest test
       - name: Perf report to summary
         if: always()
         run: |
