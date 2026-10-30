@@ -10,6 +10,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /**
  * Repeatable micro-benchmark for the symbol index (MTA-8157 Phase 3). Generates a synthetic Java corpus,
  * then measures indexing time, peak-ish heap, and query latency. Opt-in (perf numbers are noisy and
@@ -19,6 +21,12 @@ import java.util.List;
  *
  * Results are printed and written to {@code target/perf-report.txt}. See
  * {@code testing/PERFORMANCE.md} for the procedure, baselines, and how to read them.
+ *
+ * <p><b>Regression gate (opt-in):</b> with {@code -Dperf.gate=true} the benchmark additionally asserts
+ * the measured metrics stay under generous ceilings. The ceilings are deliberately loose — several times
+ * the local baseline — so they tolerate noisy, slower CI runners and only trip on <i>gross</i> (roughly
+ * order-of-magnitude / algorithmic) regressions, never small deltas. This is why the gate runs nightly
+ * (see {@code nightly-benchmarks.yaml}), not per-PR. Override any ceiling with its system property.</p>
  */
 @EnabledIfSystemProperty(named = "perf", matches = "true")
 class PerfBenchmarkTest {
@@ -28,6 +36,15 @@ class PerfBenchmarkTest {
 
     private static final int FILES = Integer.getInteger("perf.files", 2000);
     private static final int QUERIES = Integer.getInteger("perf.queries", 5000);
+
+    /** When true, assert the metrics stay under the ceilings below (gross-regression gate). */
+    private static final boolean GATE = Boolean.getBoolean("perf.gate");
+
+    // Ceilings default to several times the documented local baseline (0.27 ms/file, p95 ~0.61 ms,
+    // ~13 MB heap) so slower/noisy CI runners pass but an order-of-magnitude regression fails.
+    private static final double MAX_MS_PER_FILE = Double.parseDouble(System.getProperty("perf.budget.msPerFile", "3.0"));
+    private static final double MAX_P95_US = Double.parseDouble(System.getProperty("perf.budget.p95Us", "5000"));
+    private static final long MAX_HEAP_MB = Long.getLong("perf.budget.heapMb", 256L);
 
     @Test
     void benchmarkIndexAndQuery() throws IOException {
@@ -71,6 +88,22 @@ class PerfBenchmarkTest {
         Path out = Path.of("target", "perf-report.txt");
         Files.createDirectories(out.getParent());
         Files.writeString(out, report);
+
+        if (GATE) {
+            double msPerFile = (double) indexMs / FILES;
+            // Guard against an empty/degenerate index silently passing the throughput check.
+            assertThat(symbols)
+                    .as("index produced symbols (sanity)").isPositive();
+            assertThat(msPerFile)
+                    .as("index throughput ms/file (ceiling %s; baseline ~0.27)", MAX_MS_PER_FILE)
+                    .isLessThan(MAX_MS_PER_FILE);
+            assertThat(p95)
+                    .as("query p95 latency us (ceiling %s; baseline ~610)", MAX_P95_US)
+                    .isLessThan(MAX_P95_US);
+            assertThat(heapMb)
+                    .as("used heap MB after index (ceiling %s; baseline ~13)", MAX_HEAP_MB)
+                    .isLessThanOrEqualTo(MAX_HEAP_MB);
+        }
     }
 
     private Path generateCorpus(int n) throws IOException {
