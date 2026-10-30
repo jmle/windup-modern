@@ -37,9 +37,11 @@ not by asserting equality blindly. See [`TEST_PLAN.md`](TEST_PLAN.md) and
 
 | Layer | What | When |
 |---|---|---|
-| **Unit** | JUnit (symbol index, BOM resolution, dependency-location RPC, …) + the triage-harness tests | per PR (`.github/workflows/unit-tests.yaml`) |
+| **Unit** | JUnit (symbol index, BOM resolution, dependency-location RPC, gRPC contract + error paths, binary WAR/EAR analysis, …) + the triage-harness tests | per PR (`.github/workflows/unit-tests.yaml`) |
+| **Gradle** | Real Gradle dependency resolution + source download, **Groovy and Kotlin-DSL**, across Gradle 7.6 (pre-9) and 9.x | per PR (`gradle-tests.yaml`) |
 | **Differential (CLI)** | Run the provider vs **vanilla koncur `main`**, diff each result against the Go golden, classify via the parity ledger | nightly + manual, **gating** (`koncur-differential.yaml`) |
 | **Differential (Hub)** | Same, but through **Tackle Hub in-cluster** (the production path) | nightly + manual, **gating** (`koncur-hub-e2e.yaml`) |
+| **Perf + soak** | Symbol-index perf **regression gate** + long-lived-server soak/leak checks | nightly + manual (`nightly-benchmarks.yaml`) |
 
 How the differential works (`testing/koncur_triage.py`):
 
@@ -53,8 +55,10 @@ How the differential works (`testing/koncur_triage.py`):
 
 **Current status:** across all Java sample apps, on both the CLI and Tackle Hub paths, the provider
 produces **0 unexplained differences and 0 regressions** — every difference is a documented Go-provider
-bug (over-/under-matching) or benign. Remaining work is non-functional hardening (performance, soak /
-memory-leak, resilience); see `TEST_PLAN.md` exit criteria.
+bug (over-/under-matching) or benign. Non-functional hardening (perf regression gate, soak/leak,
+resilience & security) and build-tool parity (Maven + Gradle Groovy/Kotlin-DSL + source download,
+binary WAR/EAR) are also done and gated. Remaining work is compatibility-matrix breadth (full-mode,
+`mvn://`, Java 8/17/21 bytecode) and the parity-ledger sign-off; see `TEST_PLAN.md` exit criteria.
 
 ## Repository docs
 
