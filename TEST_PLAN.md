@@ -107,7 +107,7 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
 > Status: lifecycle/leak (Stop temp-dir cleanup), concurrency, and resilience/security (zip-slip rejection,
 > graceful handling of corrupt archives / missing locations / malformed Java — `ArchiveSafetyTest`,
 > `ResilienceTest`) are implemented + gated; a perf micro-benchmark + baseline exist (advisory); soak is
-> implemented (`SoakTest`) and runs nightly via `soak.yaml`. Remaining: promote perf from advisory to a
+> implemented (`SoakTest`) and runs nightly via `nightly-benchmarks.yaml`. Remaining: promote perf from advisory to a
 > hard CI gate.
 
 - **Resource lifecycle & leaks:** `Stop` must remove the workspace *and* clean temp dirs
@@ -146,7 +146,7 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
   `gradle-tests.yaml` installs real Gradle and runs the gated L3 Gradle tests across a 7.6.x (V8) and a 9.x
   (V9) matrix, so both version-aware script variants are exercised every PR.
 - **Nightly + on demand:** `koncur-differential.yaml` — full differential corpus vs koncur `main`, **gating**
-  (see `testing/DIFFERENTIAL_HARNESS.md`). `soak.yaml` runs the L5 soak/leak cycles nightly. Remaining to wire
+  (see `testing/DIFFERENTIAL_HARNESS.md`). `nightly-benchmarks.yaml` runs the L5 perf + soak/leak cycles nightly. Remaining to wire
   into the nightly: a perf-regression gate (MTA-8157/8160).
 - **Shadow/canary:** run Java provider alongside Go on real analyses and diff *before* flipping default.
 - The stale forked-baseline `koncur-e2e` PR job has been **retired** (MTA-8152).
@@ -158,6 +158,6 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
       script paths by `gradle-tests.yaml`.*
 - [~] All `location` types + `referenced`/`dependency` features covered by the L2 synthetic oracle — *core locations covered; extend `annotated`/`filepaths`/dependency.*
 - [~] Perf within bounds of `RESOURCE_COMPARISON.md`; no CI perf regression — *advisory micro-benchmark + baseline exist (`PerfBenchmarkTest`); no hard CI perf gate yet (MTA-8157/8160).*
-- [x] Soak/leak test clean (RSS + disk stable over N Init/Stop cycles) — *`SoakTest` + nightly `soak.yaml`; Stop temp-dir cleanup fixed (MTA-8157).*
+- [x] Soak/leak test clean (RSS + disk stable over N Init/Stop cycles) — *`SoakTest` + nightly `nightly-benchmarks.yaml`; Stop temp-dir cleanup fixed (MTA-8157).*
 - [~] Works via Tackle Hub in-cluster (production path) — *CLI proven; hub e2e workflow (`koncur-hub-e2e.yaml`) wired, compatibility matrix pending (MTA-8159).*
 - [ ] Parity ledger reviewed and signed off.
