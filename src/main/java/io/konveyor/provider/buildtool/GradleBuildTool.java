@@ -8,7 +8,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -183,15 +182,9 @@ public class GradleBuildTool implements BuildTool {
         Path buildFile = findBuildFile(projectDir);
         if (!Files.exists(buildFile)) return;
 
-        boolean gradle9 = isGradle9OrLater(projectDir);
-        String taskScript = gradle9 ? GradleTaskScripts.RESOLVE_DEPS_V9 : GradleTaskScripts.RESOLVE_DEPS_V8;
-
         try {
-            if (gradle9) {
-                runTaskWithRename(projectDir, buildFile, taskScript, "konveyorResolveDependencies");
-            } else {
-                runTaskWithBuildFile(projectDir, buildFile, taskScript, "konveyorResolveDependencies");
-            }
+            runTaskWithInitScript(projectDir, GradleTaskScripts.RESOLVE_DEPS,
+                    "konveyorResolveDependencies", isGradle9OrLater(projectDir));
         } catch (Exception e) {
             LOG.warn("Custom resolve task failed, falling back to standard resolution: {}", e.getMessage());
         }
@@ -202,51 +195,33 @@ public class GradleBuildTool implements BuildTool {
         if (!Files.exists(buildFile)) return;
 
         boolean gradle9 = isGradle9OrLater(projectDir);
-        String taskScript = gradle9 ? GradleTaskScripts.DOWNLOAD_SOURCES_V9 : GradleTaskScripts.DOWNLOAD_SOURCES_V8;
-
         try {
-            if (gradle9) {
-                runTaskWithRename(projectDir, buildFile, taskScript, "konveyorDownloadSources");
-            } else {
-                runTaskWithBuildFile(projectDir, buildFile, taskScript, "konveyorDownloadSources");
-            }
+            runTaskWithInitScript(projectDir, GradleTaskScripts.downloadSourcesInit(gradle9),
+                    "konveyorDownloadSources", gradle9);
         } catch (Exception e) {
             LOG.warn("Source download task failed: {}", e.getMessage());
         }
     }
 
-    private void runTaskWithBuildFile(Path projectDir, Path buildFile, String taskScript, String taskName)
+    /**
+     * Runs an embedded task via {@code --init-script}. Unlike appending to the build file, this is
+     * DSL-agnostic (works for {@code build.gradle} and {@code build.gradle.kts}) and never mutates the
+     * project. {@code noConfigCache} disables the configuration cache on Gradle 9+ (our injected task
+     * resolves at execution time); older Gradle doesn't accept the flag, so it's only added when set.
+     */
+    private void runTaskWithInitScript(Path projectDir, String initScript, String taskName, boolean noConfigCache)
             throws IOException {
-        Path tempFile = Files.createTempFile(projectDir, ".konveyor-", ".gradle");
+        Path tempFile = Files.createTempFile("konveyor-init-", ".gradle");
         try {
-            String originalContent = Files.readString(buildFile);
-            Files.writeString(tempFile, originalContent + "\n" + taskScript);
+            Files.writeString(tempFile, initScript);
 
             String gradleCmd = findGradleCommand(projectDir);
             List<String> command = new ArrayList<>(List.of(
-                    gradleCmd, "--build-file", tempFile.toString(), taskName, "--no-daemon"));
+                    gradleCmd, "--init-script", tempFile.toString(), taskName, "--no-daemon"));
+            if (noConfigCache) command.add("--no-configuration-cache");
             runCommand(command, projectDir);
         } finally {
             Files.deleteIfExists(tempFile);
-        }
-    }
-
-    private void runTaskWithRename(Path projectDir, Path buildFile, String taskScript, String taskName)
-            throws IOException {
-        Path backup = projectDir.resolve("toberenamed-" + taskName + buildFile.getFileName().toString().substring(buildFile.getFileName().toString().lastIndexOf('.')));
-        try {
-            String originalContent = Files.readString(buildFile);
-            Files.move(buildFile, backup, StandardCopyOption.ATOMIC_MOVE);
-            Files.writeString(buildFile, originalContent + "\n" + taskScript);
-
-            String gradleCmd = findGradleCommand(projectDir);
-            List<String> command = new ArrayList<>(List.of(
-                    gradleCmd, taskName, "--no-daemon", "--no-configuration-cache"));
-            runCommand(command, projectDir);
-        } finally {
-            if (Files.exists(backup)) {
-                Files.move(backup, buildFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            }
         }
     }
 

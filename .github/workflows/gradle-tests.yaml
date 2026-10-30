@@ -1,9 +1,10 @@
 name: Gradle Tests
 
 # Exercises the version-aware Gradle code paths (dependency resolution + dependency-SOURCE download,
-# MTA-8217) against real Gradle installs. These tests are gated on `gradle` being on PATH (@EnabledIf
-# "gradleAvailable"), so in the plain Unit Tests workflow they skip. Here we install Gradle explicitly
-# and run them across a <9 and a 9+ version to cover BOTH script variants:
+# MTA-8217) against real Gradle installs, including Kotlin-DSL (build.gradle.kts) projects (MTA-8159).
+# These tests are gated on `gradle` being on PATH (@EnabledIf "gradleAvailable"), so in the plain Unit
+# Tests workflow they skip. Here we install Gradle explicitly and run them across a <9 and a 9+ version
+# to cover BOTH script variants:
 #   - 7.6.x -> isGradle9OrLater == false -> RESOLVE_DEPS_V8 / DOWNLOAD_SOURCES_V8 (project.buildDir)
 #   - 9.x   -> isGradle9OrLater == true  -> RESOLVE_DEPS_V9 / DOWNLOAD_SOURCES_V9 (layout.buildDirectory)
 #
@@ -50,6 +51,6 @@ jobs:
       - name: Run gated Gradle tests
         run: >-
           mvn -B
-          -Dtest=GradleResolutionTest,GradleSourceResolutionTest
+          -Dtest=GradleResolutionTest,GradleSourceResolutionTest,GradleKotlinDslTest
           -Dsurefire.failIfNoTests=false
           test
