@@ -151,6 +151,31 @@ three real provider regressions are fixed — two awaiting a CI environment with
 re-triage the 3 changed tests (daytrader + both book-server); ideally also close the two tomcat-legacy
 fixes in a CI env that can reach the private repo.
 
+### daytrader — first-pass delta triage (2026-11-06)
+Ran the native provider on daytrader (`ci-oct2025`, source-only, `cloud-readiness || quarkus`) and triaged
+vs the current golden. Two groups:
+
+- **13 `java-fewer` on `ee-to-quarkus-00020` → EXPLAINED** (the refreshed `go-wrong` over-match entry —
+  Go matches non-annotation `javax.ejb` type refs; Java matches only annotations).
+- **~50–76 `java-more` → benign / environmental.** Triage finding: **every** one is on a **builtin-provider**
+  rule (`builtin.file` / `builtin.xml` / `builtin.filecontent` / `builtin.has`) matching **non-Java**
+  artifacts — `.xhtml` (19), `.xml` (18), `.properties` (6), `MANIFEST.MF`, `.jar`/`.ear`. **Zero** land on
+  a `.java` file and **none** use `java.referenced` / `java.dependency`. These are the Go **builtin**
+  provider + **ruleset version** (both identical regardless of which *Java* provider runs), differing
+  because the test kantra install ships a different analyzer/ruleset version than koncur used to generate
+  the golden.
+
+**Conclusion:** the **Java provider under test has 0 unexplained divergences on daytrader** — its only
+divergence is the explained `ee-to-quarkus-00020` over-match. The java-more noise is build-tool/ruleset
+version skew, not the provider.
+
+**Follow-ups this exposes:**
+1. **Scope the differential comparator to java-provider rules** — ignore `builtin.*`-only rules so
+   builtin/ruleset-version skew can't masquerade as a java-provider divergence. (Today the comparator
+   diffs every incident in `output.yaml`, including builtin ones.)
+2. **Pin `ruleset_ref`** (and run the native provider against the *same* analyzer/ruleset version koncur
+   used) before a clean delta re-sync.
+
 ---
 
 ## 3. How to reproduce
