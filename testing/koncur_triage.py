@@ -82,13 +82,18 @@ def _when_uses_java(node):
     return False
 
 
-def load_java_rule_ids(rulesets_dir):
-    """Scan a rulesets directory and return the set of ruleIDs whose `when` uses the Java provider.
+def load_rule_capabilities(rulesets_dir):
+    """Scan a rulesets dir; return (java_rule_ids, all_rule_ids).
 
-    Robust to the two koncur/analyzer file shapes (a bare list of rules, or a dict with a `rules`
-    list) and to unparseable/metadata files (e.g. ruleset.yaml), which contribute no ruleIDs.
+    java_rule_ids: ruleIDs whose `when` uses the Java provider (java.referenced / java.dependency).
+    all_rule_ids:  every ruleID seen. The caller skips only `all - java` (CONFIRMED builtin-only);
+    a rule absent from `all` (e.g. an incomplete extract) has unknown capability and is NOT skipped,
+    so a partial/wrong ruleset path degrades to "compare all" and can never mask a divergence.
+
+    Robust to the two file shapes (a bare list of rules, or a dict with a `rules` list) and to
+    unparseable/metadata files (e.g. ruleset.yaml), which contribute no ruleIDs.
     """
-    ids = set()
+    java, allids = set(), set()
     root = Path(rulesets_dir)
     files = sorted(set(root.rglob("*.yaml")) | set(root.rglob("*.yml")))
     for path in files:
@@ -101,9 +106,17 @@ def load_java_rule_ids(rulesets_dir):
         if not isinstance(rules, list):
             continue
         for r in rules:
-            if isinstance(r, dict) and r.get("ruleID") and _when_uses_java(r.get("when")):
-                ids.add(r["ruleID"])
-    return ids
+            if not (isinstance(r, dict) and r.get("ruleID")):
+                continue
+            allids.add(r["ruleID"])
+            if _when_uses_java(r.get("when")):
+                java.add(r["ruleID"])
+    return java, allids
+
+
+def load_java_rule_ids(rulesets_dir):
+    """Convenience: just the java-provider ruleIDs (see load_rule_capabilities)."""
+    return load_rule_capabilities(rulesets_dir)[0]
 
 
 # ── koncur output parsing ───────────────────────────────────────────────────
@@ -206,15 +219,16 @@ def _diff_incidents(gi, ai):
 
 def diff_test(test, golden, actual, cfg):
     divs = []
-    # Optional: scope to java-provider rules only (ignore builtin-only rules). None = no scoping.
-    java_rule_ids = cfg.get("java_rule_ids")
+    # Optional java-provider scoping: skip rules CONFIRMED builtin-only. Unknown rules are never
+    # skipped, so an incomplete ruleset path can't mask a divergence. Empty set = no scoping.
+    skip_rule_ids = cfg.get("skip_rule_ids") or set()
     g_rs, a_rs = parse_rulesets(golden), parse_rulesets(actual)
     for name in sorted(set(g_rs) | set(a_rs)):
         g = g_rs.get(name, {"rules": {}, "tags": set(), "unmatched": set()})
         a = a_rs.get(name, {"rules": {}, "tags": set(), "unmatched": set()})
         for rule in sorted(set(g["rules"]) | set(a["rules"])):
-            if java_rule_ids is not None and rule not in java_rule_ids:
-                continue  # builtin-only rule: out of scope for the java-provider differential
+            if rule in skip_rule_ids:
+                continue  # confirmed builtin-only rule: out of scope for the java-provider differential
             removed, added = _diff_incidents(g["rules"].get(rule, []), a["rules"].get(rule, []))
             for inc in removed:
                 divs.append(Divergence(test, name, rule, "java-fewer", inc))
@@ -298,14 +312,15 @@ def main(argv=None):
         print(f"SKIPPED: {args.test} is excluded (not a Java-provider test)")
         return 0
     if args.rulesets:
-        java_ids = load_java_rule_ids(args.rulesets)
-        if not java_ids:
-            # Empty set would skip EVERY rule -> a false "clean". Refuse to scope; compare all.
-            print(f"WARNING: no java-provider rules found under {args.rulesets}; "
-                  f"NOT scoping (comparing all rules) to avoid masking divergences.\n", file=sys.stderr)
+        java_ids, all_ids = load_rule_capabilities(args.rulesets)
+        if not all_ids:
+            # Parsed no rules at all (wrong/empty path) -> don't scope; compare all.
+            print(f"WARNING: no rules found under {args.rulesets}; NOT scoping (comparing all rules) "
+                  f"to avoid masking divergences.\n", file=sys.stderr)
         else:
-            cfg["java_rule_ids"] = java_ids
-            print(f"Scoped to {len(java_ids)} java-provider rules (from {args.rulesets})\n")
+            cfg["skip_rule_ids"] = all_ids - java_ids  # confirmed builtin-only
+            print(f"Scoping to java-provider rules: {len(java_ids)} java / {len(all_ids)} total; "
+                  f"skipping {len(cfg['skip_rule_ids'])} builtin-only rules (from {args.rulesets})\n")
     with open(args.golden) as f:
         golden = yaml.safe_load(f)
     with open(args.actual) as f:

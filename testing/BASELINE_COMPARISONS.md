@@ -170,12 +170,13 @@ divergence is the explained `ee-to-quarkus-00020` over-match. The java-more nois
 version skew, not the provider.
 
 **Follow-ups this exposes:**
-1. **Scope the differential comparator to java-provider rules** — ✅ **implemented**: `koncur_triage.py
-   --rulesets <dir>` classifies each ruleID by its `when` capability and diffs only `java.referenced` /
-   `java.dependency` rules, skipping `builtin.*`-only rules. With it, daytrader goes from 76 unexplained to
-   **0** (only the 13 explained over-match remain). Opt-in and fail-safe (won't scope if the path yields no
-   java rules). Default (gating) CI stays unscoped/conservative until a *complete* ruleset extraction is
-   wired in — a partial extract could wrongly skip real java rules.
+1. **Scope the differential comparator to java-provider rules** — ✅ **implemented + wired**:
+   `koncur_triage.py --rulesets <dir>` classifies each ruleID by its `when` capability and skips only
+   rules **confirmed** `builtin.*`-only; unknown rules are still compared, so a partial/wrong ruleset path
+   degrades to "compare all" and can never mask a divergence. With it, daytrader goes from 76 unexplained
+   to **0** (only the 13 explained over-match remain). The gating `koncur-differential.yaml` now best-effort
+   extracts the bundled rulesets from the kantra image and passes `--rulesets` (falling back to unscoped if
+   extraction fails). _(The hub workflow could get the same once its ruleset source is confirmed.)_
 2. **Pin `ruleset_ref`** (and run the native provider against the *same* analyzer/ruleset version koncur
    used) before a clean delta re-sync.
 
