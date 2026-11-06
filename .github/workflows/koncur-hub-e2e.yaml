@@ -18,6 +18,11 @@ jobs:
   koncur-hub-differential:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      # Pinned kantra image (bundles rulesets at /opt/rulesets) for the triage's java-rule scoping.
+      # Keep in sync with the ledger baseline.ruleset_ref. (The Hub analysis itself uses the analyzer
+      # addon image; this pin only governs the ruleset version used to classify java vs builtin rules.)
+      KANTRA_IMAGE: quay.io/konveyor/kantra@sha256:c57b12b64809017b8f8099da41f908e970343d79fda66f72409cc0aa23e9d3b2
     steps:
       - name: Checkout (this repo — triage script + ledger)
         uses: actions/checkout@v4
@@ -50,7 +55,7 @@ jobs:
         run: |
           set +e
           for p in /opt/rulesets /usr/local/etc/rulesets /root/.kantra/rulesets; do
-            cid=$(podman create --name rs-extract quay.io/konveyor/kantra:latest)
+            cid=$(podman create --name rs-extract "$KANTRA_IMAGE")
             if podman cp "$cid:$p" /tmp/rulesets 2>/dev/null && [ -d /tmp/rulesets ]; then
               podman rm "$cid" >/dev/null 2>&1
               echo "Extracted rulesets from kantra image: $p"

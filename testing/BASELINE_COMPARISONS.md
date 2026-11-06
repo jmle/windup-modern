@@ -155,8 +155,11 @@ skew (xhtml/xml/properties/manifest), not the provider.
 
 Caveats / still open:
 - This is a **scoped local** re-sync (the install's ruleset version may differ from koncur's). The
-  authoritative confirmation is the gating workflows, which now also pass `--rulesets`; `ruleset_ref`
-  should still be **pinned** so CLI and golden use the identical analyzer/ruleset version.
+  authoritative confirmation is the gating workflows, which now also pass `--rulesets`.
+- `ruleset_ref` is now **pinned** (`baseline.ruleset_ref` = `quay.io/konveyor/kantra@sha256:c57b12b6…`,
+  rulesets bundled at `/opt/rulesets`); both gating workflows pin kantra + ruleset extraction to that
+  digest. Residual: koncur's own golden generation still tracks mutable `:latest`, so for a true zero-skew
+  run the goldens should be regenerated at this same digest.
 - The two **tomcat-legacy** fixes remain `fixed-pending-ci` (need a CI env that can reach the private repo).
 
 ### daytrader — first-pass delta triage (2026-11-06)
@@ -185,8 +188,10 @@ version skew, not the provider.
    to **0** (only the 13 explained over-match remain). The gating `koncur-differential.yaml` now best-effort
    extracts the bundled rulesets from the kantra image and passes `--rulesets` (falling back to unscoped if
    extraction fails). _(The hub workflow could get the same once its ruleset source is confirmed.)_
-2. **Pin `ruleset_ref`** (and run the native provider against the *same* analyzer/ruleset version koncur
-   used) before a clean delta re-sync.
+2. **Pin `ruleset_ref`** — ✅ **done**: pinned to the kantra image digest that bundles the rulesets
+   (`quay.io/konveyor/kantra@sha256:c57b12b6…`, `/opt/rulesets`); both gating workflows pin kantra +
+   ruleset extraction to it. Residual: koncur regenerates goldens with mutable `:latest`, so a fully
+   zero-skew run also needs the goldens regenerated at this digest.
 
 ---
 
