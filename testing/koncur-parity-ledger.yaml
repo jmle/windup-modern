@@ -21,12 +21,29 @@ version: 1
 
 # The Go system-of-record this ledger was triaged against, plus the prior-triage fork point.
 baseline:
-  koncur_go_ref: 5ce4fb0ffd4fab2a7e4474ac15b8c00368d763a5   # upstream/main @ 2026-10-20 (re-sync target)
+  koncur_go_ref: 2d3cbea260f54ea2c1243ab0e06272a2a4351d90   # konveyor/koncur main @ 2026-10-30
+  prior_koncur_go_ref: 5ce4fb0ffd4fab2a7e4474ac15b8c00368d763a5  # previous baseline @ 2026-10-20
   prior_triage_merge_base: 70eee774c3180c27d8a296645de040fc64512bfc
   forked_golden_branch_tip: 002c902ede9d3fe5f08ab96d0e5dacc7dc2112a9  # to retire (MTA-8152)
   ruleset_ref: TODO            # pin analyzer-lsp / rulesets version used for the run
   kantra_image: TODO           # pin to a digest, not :latest
   java_provider_image: TODO    # tag/digest of the provider under test
+
+# Delta re-sync log (newest first). A re-sync re-runs only the tests whose golden changed and carries
+# forward unchanged entries; see TEST_PLAN.md L4 / BASELINE_COMPARISONS.md.
+resync_log:
+  - date: 2026-11-06
+    koncur_go_ref: 2d3cbea260f54ea2c1243ab0e06272a2a4351d90
+    method: local new-provider kantra, java-provider-scoped triage (--rulesets); apps @ ci-oct2025
+    changed_goldens: [daytrader, book-server-deps, book-server-source]
+    result: >
+      All 3 clean against the Java provider. daytrader: 13 EXPLAINED (ee-to-quarkus-00020 go-wrong
+      over-match), 0 unexplained. book-server-deps / book-server-source: 0 divergence (8 java incidents
+      across 5 java rules match the golden exactly). The golden drift that flagged these was entirely
+      builtin-provider / ruleset-version skew (xhtml/xml/properties/manifest), not the Java provider.
+    caveat: >
+      Scoped local re-sync (ruleset version may differ from koncur's). Authoritative confirmation is the
+      gating workflows once ruleset_ref is pinned; those now also pass --rulesets (java-provider scope).
 
 # Comparator normalization applied before diffing (see TEST_PLAN.md L4).
 comparator:

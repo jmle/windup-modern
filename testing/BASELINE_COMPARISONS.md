@@ -138,18 +138,26 @@ divergences, 0 open regressions** across the runnable corpus.
 So the only standing "failures" are **documented Go-provider bugs** (Java is more correct), and all
 three real provider regressions are fixed — two awaiting a CI environment with private-repo access.
 
-### ⚠️ This snapshot is stale vs *current* koncur
-- koncur `main` has advanced **7 commits** past the ledger baseline, and that baseline is **not an
-  ancestor** of current HEAD (an upstream-vs-fork divergence) — the pin is out of date.
-- **3 goldens changed** since: `daytrader`, `book-server-deps`, `book-server-source` (likely
-  ruleset-version bumps). The daytrader change does **not** touch our ledger rule
-  (`ee-to-quarkus-00020`), so that entry almost certainly still holds — but the golden moved ~100 lines
-  on other rules, so "0 divergences vs current koncur" can't be claimed without a re-run.
-- Ledger `ruleset_ref` / `kantra_image` / `java_provider_image` pins are still `TODO`.
+### Delta re-sync to current koncur — done (2026-11-06)
+koncur `main` had advanced 7 commits past the previous baseline, changing 3 goldens (`daytrader`,
+`book-server-deps`, `book-server-source`). Re-synced: baseline re-pinned to current koncur HEAD
+(`2d3cbea`, 2026-10-30; see the ledger `baseline` + `resync_log`), and the 3 changed tests re-triaged
+with the native provider (apps @ `ci-oct2025`), **java-provider-scoped** (`--rulesets`):
 
-**Needed to make a current claim:** a **delta re-run** — re-pin the baseline to current koncur HEAD and
-re-triage the 3 changed tests (daytrader + both book-server); ideally also close the two tomcat-legacy
-fixes in a CI env that can reach the private repo.
+| Test | Result |
+|---|---|
+| daytrader | 13 EXPLAINED (the `ee-to-quarkus-00020` go-wrong over-match), **0 unexplained** |
+| book-server-deps | **0 divergence** — 8 java incidents / 5 java rules match the golden exactly |
+| book-server-source | **0 divergence** — same |
+
+All clean against the Java provider; the golden drift was entirely builtin-provider / ruleset-version
+skew (xhtml/xml/properties/manifest), not the provider.
+
+Caveats / still open:
+- This is a **scoped local** re-sync (the install's ruleset version may differ from koncur's). The
+  authoritative confirmation is the gating workflows, which now also pass `--rulesets`; `ruleset_ref`
+  should still be **pinned** so CLI and golden use the identical analyzer/ruleset version.
+- The two **tomcat-legacy** fixes remain `fixed-pending-ci` (need a CI env that can reach the private repo).
 
 ### daytrader — first-pass delta triage (2026-11-06)
 Ran the native provider on daytrader (`ci-oct2025`, source-only, `cloud-readiness || quarkus`) and triaged
