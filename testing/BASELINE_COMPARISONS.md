@@ -170,9 +170,12 @@ divergence is the explained `ee-to-quarkus-00020` over-match. The java-more nois
 version skew, not the provider.
 
 **Follow-ups this exposes:**
-1. **Scope the differential comparator to java-provider rules** — ignore `builtin.*`-only rules so
-   builtin/ruleset-version skew can't masquerade as a java-provider divergence. (Today the comparator
-   diffs every incident in `output.yaml`, including builtin ones.)
+1. **Scope the differential comparator to java-provider rules** — ✅ **implemented**: `koncur_triage.py
+   --rulesets <dir>` classifies each ruleID by its `when` capability and diffs only `java.referenced` /
+   `java.dependency` rules, skipping `builtin.*`-only rules. With it, daytrader goes from 76 unexplained to
+   **0** (only the 13 explained over-match remain). Opt-in and fail-safe (won't scope if the path yields no
+   java rules). Default (gating) CI stays unscoped/conservative until a *complete* ruleset extraction is
+   wired in — a partial extract could wrongly skip real java rules.
 2. **Pin `ruleset_ref`** (and run the native provider against the *same* analyzer/ruleset version koncur
    used) before a clean delta re-sync.
 

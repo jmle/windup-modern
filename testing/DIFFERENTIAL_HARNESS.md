@@ -38,9 +38,15 @@ truth (Go is sometimes wrong; those are `go-wrong` ledger entries).
   provider's incident output, so provider parity compares **incidents only**; `exclude_tests` drops
   non-Java tests (python/go/.NET) which validate other providers. With this scope both the CLI and Hub
   paths are clean (0 unexplained). _(Tag diffing / direction-scoping remain available if `diff_tags` is
-  re-enabled — e.g. `direction: [java-more, tag-added]`.)_
-- **`test_koncur_triage.py`** — unit tests (19) covering diff, normalization, count-based non-source
-  matching, direction-aware classification, and the gate. Run:
+  re-enabled — e.g. `direction: [java-more, tag-added]`.)_ **Optional java-provider scoping** (`--rulesets
+  <dir>`): classify each ruleID by its `when` capability and diff **only** rules that use the Java provider
+  (`java.referenced` / `java.dependency`), skipping `builtin.*`-only rules (file/xml/filecontent/has) whose
+  divergences reflect **ruleset/analyzer-version skew**, not the provider under test. Safe by construction —
+  if no java rules are found under the path (misconfigured), it refuses to scope and compares all rather
+  than falsely reporting clean. See `BASELINE_COMPARISONS.md` for why (the daytrader java-more bucket was
+  entirely builtin rules on `.xhtml`/`.xml`/`.properties`).
+- **`test_koncur_triage.py`** — unit tests (27) covering diff, normalization, count-based non-source
+  matching, direction-aware classification, java-rule scoping, and the gate. Run:
   `cd testing && python3 -m unittest -v test_koncur_triage`.
 - **`koncur-parity-ledger.yaml`** — the durable triage record (seeded from `FAILING_TESTS.md`).
 
@@ -53,6 +59,11 @@ python3 testing/koncur_triage.py \
     --golden /path/to/koncur/tests/daytrader/expected-output.yaml \
     --actual /path/to/run/output.yaml
 # exit 0 = clean; 1 = UNEXPLAINED/PENDING (or KNOWN_BUG without --allow-known)
+
+# Optionally scope to java-provider rules (ignore builtin-only rules):
+#   add  --rulesets /path/to/kantra/rulesets
+# e.g. against the local new-provider kantra install:
+#   --rulesets ~/Downloads/kantra-java-native.linux.amd64/rulesets
 ```
 
 ## CI (current)

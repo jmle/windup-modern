@@ -165,5 +165,53 @@ class ClassifyGateTests(unittest.TestCase):
         self.assertEqual(kt.gate([self._div()], ledger, allow_known=True)[0], 0)
 
 
+class JavaRuleScopingTests(unittest.TestCase):
+    def test_when_uses_java_detects_capabilities(self):
+        self.assertTrue(kt._when_uses_java({"java.referenced": {"location": "ANNOTATION"}}))
+        self.assertTrue(kt._when_uses_java({"java.dependency": {"name": "x"}}))
+
+    def test_when_uses_java_recurses_and_or_not(self):
+        self.assertTrue(kt._when_uses_java({"or": [{"builtin.file": {}}, {"java.referenced": {}}]}))
+        self.assertTrue(kt._when_uses_java({"and": [{"not": {"java.dependency": {}}}]}))
+
+    def test_when_uses_java_false_for_builtin_only(self):
+        self.assertFalse(kt._when_uses_java({"builtin.file": {"pattern": r"^.*\.properties$"}}))
+        self.assertFalse(kt._when_uses_java({"or": [{"builtin.xml": {}}, {"builtin.filecontent": {}}]}))
+        self.assertFalse(kt._when_uses_java(None))
+
+    def test_load_java_rule_ids_from_dir(self):
+        import tempfile, os, yaml
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "sub"))
+            with open(os.path.join(d, "a.yaml"), "w") as f:
+                yaml.safe_dump([
+                    {"ruleID": "java-ref", "when": {"java.referenced": {"location": "TYPE"}}},
+                    {"ruleID": "builtin-only", "when": {"builtin.file": {"pattern": "x"}}},
+                ], f)
+            with open(os.path.join(d, "sub", "b.windup.yaml"), "w") as f:
+                yaml.safe_dump([
+                    {"ruleID": "java-dep", "when": {"or": [{"builtin.xml": {}}, {"java.dependency": {"name": "y"}}]}},
+                ], f)
+            # a metadata/unparseable file must contribute nothing, not crash
+            with open(os.path.join(d, "ruleset.yaml"), "w") as f:
+                f.write("name: meta\ndescription: not a rule list\n")
+            ids = kt.load_java_rule_ids(d)
+        self.assertEqual(ids, {"java-ref", "java-dep"})
+
+    def test_diff_test_scopes_out_builtin_only_rules(self):
+        # golden has an extra incident on a builtin rule and on a java rule
+        golden = [ruleset("rs", {
+            "java-ref": {"incidents": [incident("file:///source/A.java", 10)]},
+            "builtin-only": {"incidents": [incident("file:///app/x.properties", 0)]},
+        })]
+        actual = [ruleset("rs", {})]  # java-more/fewer on both rules
+        # unscoped: both rules diverge
+        self.assertEqual(len(kt.diff_test("t", golden, actual, CFG)), 2)
+        # scoped to java rules: only the java-ref divergence remains
+        cfg = dict(CFG); cfg["java_rule_ids"] = {"java-ref"}
+        divs = kt.diff_test("t", golden, actual, cfg)
+        self.assertEqual([d.rule for d in divs], ["java-ref"])
+
+
 if __name__ == "__main__":
     unittest.main()

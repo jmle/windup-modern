@@ -20,6 +20,7 @@ This module is import-safe; the diff/classify functions are unit-tested in test_
 """
 import argparse
 import sys
+from pathlib import Path
 import yaml
 
 EXPLAINED, KNOWN_BUG, PENDING, UNEXPLAINED = "EXPLAINED", "KNOWN_BUG", "PENDING", "UNEXPLAINED"
@@ -54,6 +55,55 @@ def rule_matches(entry_rule, rule):
     if entry_rule.endswith("*"):
         return rule.startswith(entry_rule[:-1])
     return entry_rule == rule
+
+
+# ── rule-capability scoping (java-provider vs builtin) ────────────────────────
+# A rule exercises the Java provider iff its `when` clause uses a `java.*` capability
+# (java.referenced / java.dependency). Rules that are purely `builtin.*` (file/xml/
+# filecontent/has/json) are evaluated by the engine's builtin provider — identical no
+# matter which Java provider runs — so their divergences reflect ruleset/analyzer-version
+# skew, not the provider under test. Scoping the diff to java-provider rules keeps that
+# noise out of the java-provider differential. See testing/BASELINE_COMPARISONS.md.
+
+_JAVA_CAPABILITIES = ("java.referenced", "java.dependency")
+
+
+def _when_uses_java(node):
+    """True if a rule's `when` subtree references a java.* capability (recurses and/or/not)."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(k, str) and k in _JAVA_CAPABILITIES:
+                return True
+            if _when_uses_java(v):
+                return True
+        return False
+    if isinstance(node, list):
+        return any(_when_uses_java(x) for x in node)
+    return False
+
+
+def load_java_rule_ids(rulesets_dir):
+    """Scan a rulesets directory and return the set of ruleIDs whose `when` uses the Java provider.
+
+    Robust to the two koncur/analyzer file shapes (a bare list of rules, or a dict with a `rules`
+    list) and to unparseable/metadata files (e.g. ruleset.yaml), which contribute no ruleIDs.
+    """
+    ids = set()
+    root = Path(rulesets_dir)
+    files = sorted(set(root.rglob("*.yaml")) | set(root.rglob("*.yml")))
+    for path in files:
+        try:
+            with open(path) as f:
+                doc = yaml.safe_load(f)
+        except Exception:
+            continue
+        rules = doc if isinstance(doc, list) else (doc.get("rules") if isinstance(doc, dict) else None)
+        if not isinstance(rules, list):
+            continue
+        for r in rules:
+            if isinstance(r, dict) and r.get("ruleID") and _when_uses_java(r.get("when")):
+                ids.add(r["ruleID"])
+    return ids
 
 
 # ── koncur output parsing ───────────────────────────────────────────────────
@@ -156,11 +206,15 @@ def _diff_incidents(gi, ai):
 
 def diff_test(test, golden, actual, cfg):
     divs = []
+    # Optional: scope to java-provider rules only (ignore builtin-only rules). None = no scoping.
+    java_rule_ids = cfg.get("java_rule_ids")
     g_rs, a_rs = parse_rulesets(golden), parse_rulesets(actual)
     for name in sorted(set(g_rs) | set(a_rs)):
         g = g_rs.get(name, {"rules": {}, "tags": set(), "unmatched": set()})
         a = a_rs.get(name, {"rules": {}, "tags": set(), "unmatched": set()})
         for rule in sorted(set(g["rules"]) | set(a["rules"])):
+            if java_rule_ids is not None and rule not in java_rule_ids:
+                continue  # builtin-only rule: out of scope for the java-provider differential
             removed, added = _diff_incidents(g["rules"].get(rule, []), a["rules"].get(rule, []))
             for inc in removed:
                 divs.append(Divergence(test, name, rule, "java-fewer", inc))
@@ -233,12 +287,25 @@ def main(argv=None):
     ap.add_argument("--actual", required=True)
     ap.add_argument("--allow-known", action="store_true",
                     help="treat ledger-tracked java-wrong as expected (non-failing)")
+    ap.add_argument("--rulesets",
+                    help="path to the rulesets dir; scope the diff to java-provider rules "
+                         "(java.referenced / java.dependency), ignoring builtin-only rules so "
+                         "ruleset/analyzer-version skew doesn't masquerade as a provider divergence")
     args = ap.parse_args(argv)
 
     ledger, cfg = load_ledger(args.ledger)
     if args.test in (cfg.get("exclude_tests") or []):
         print(f"SKIPPED: {args.test} is excluded (not a Java-provider test)")
         return 0
+    if args.rulesets:
+        java_ids = load_java_rule_ids(args.rulesets)
+        if not java_ids:
+            # Empty set would skip EVERY rule -> a false "clean". Refuse to scope; compare all.
+            print(f"WARNING: no java-provider rules found under {args.rulesets}; "
+                  f"NOT scoping (comparing all rules) to avoid masking divergences.\n", file=sys.stderr)
+        else:
+            cfg["java_rule_ids"] = java_ids
+            print(f"Scoped to {len(java_ids)} java-provider rules (from {args.rulesets})\n")
     with open(args.golden) as f:
         golden = yaml.safe_load(f)
     with open(args.actual) as f:
