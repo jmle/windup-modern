@@ -18,6 +18,11 @@ jobs:
   koncur-hub-differential:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      # Pinned kantra image (bundles rulesets at /opt/rulesets) for the triage's java-rule scoping.
+      # Keep in sync with the ledger baseline.ruleset_ref. (The Hub analysis itself uses the analyzer
+      # addon image; this pin only governs the ruleset version used to classify java vs builtin rules.)
+      KANTRA_IMAGE: quay.io/konveyor/kantra@sha256:c57b12b64809017b8f8099da41f908e970343d79fda66f72409cc0aa23e9d3b2
     steps:
       - name: Checkout (this repo — triage script + ledger)
         uses: actions/checkout@v4
@@ -41,6 +46,29 @@ jobs:
 
       - name: Build Java provider image
         run: podman build -f Dockerfile.kantra -t localhost/java-provider:test .
+
+      - name: Extract rulesets (for java-provider scoping)
+        # Best-effort: pull the bundled rulesets from the kantra image so the triage can scope to
+        # java-provider rules (java.referenced/java.dependency) and skip builtin-only rules. A rule's
+        # capability is version-independent, so this is valid for the Hub path too. Safe by design: an
+        # unknown/unfound rule is still compared, and a failed extraction => compare all (never masks).
+        run: |
+          set +e
+          for p in /opt/rulesets /usr/local/etc/rulesets /root/.kantra/rulesets; do
+            cid=$(podman create --name rs-extract "$KANTRA_IMAGE")
+            if podman cp "$cid:$p" /tmp/rulesets 2>/dev/null && [ -d /tmp/rulesets ]; then
+              podman rm "$cid" >/dev/null 2>&1
+              echo "Extracted rulesets from kantra image: $p"
+              break
+            fi
+            podman rm "$cid" >/dev/null 2>&1
+          done
+          if [ -d /tmp/rulesets ]; then
+            echo "rulesets .yaml count: $(find /tmp/rulesets -name '*.yaml' | wc -l)"
+          else
+            echo "WARNING: could not extract rulesets; triage will compare all rules (unscoped)."
+          fi
+          exit 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -117,6 +145,8 @@ jobs:
         working-directory: /tmp/koncur
         run: |
           mkdir -p /tmp/triage-reports
+          RS_ARG=""
+          [ -d /tmp/rulesets ] && RS_ARG="--rulesets /tmp/rulesets"
           overall=0
           for d in tests/*/; do
             t=$(basename "$d")
@@ -129,7 +159,7 @@ jobs:
             echo "::group::triage $t"
             python3 "$GITHUB_WORKSPACE/testing/koncur_triage.py" \
               --ledger "$GITHUB_WORKSPACE/testing/koncur-parity-ledger.yaml" \
-              --test "$t" --golden "$golden" --actual "$f" \
+              --test "$t" --golden "$golden" --actual "$f" $RS_ARG \
               | tee "/tmp/triage-reports/$t.txt"
             rc=${PIPESTATUS[0]}
             echo "::endgroup::"

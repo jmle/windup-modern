@@ -16,6 +16,11 @@ jobs:
   koncur-differential:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      # Pinned kantra image (bundles the rulesets at /opt/rulesets). Keep in sync with the ledger
+      # baseline.ruleset_ref / kantra_image. Pinning the digest makes the kantra binary AND the ruleset
+      # version reproducible instead of tracking mutable :latest.
+      KANTRA_IMAGE: quay.io/konveyor/kantra@sha256:c57b12b64809017b8f8099da41f908e970343d79fda66f72409cc0aa23e9d3b2
     steps:
       - name: Checkout (this repo — triage script + ledger)
         uses: actions/checkout@v4
@@ -47,10 +52,33 @@ jobs:
 
       - name: Install kantra
         run: |
-          podman cp $(podman create --name kantra-extract quay.io/konveyor/kantra:latest):/usr/local/bin/kantra . && \
+          podman cp $(podman create --name kantra-extract "$KANTRA_IMAGE"):/usr/local/bin/kantra . && \
             podman rm kantra-extract
           install -m 755 kantra $HOME/.local/bin/kantra
           rm kantra
+
+      - name: Extract rulesets (for java-provider scoping)
+        # Best-effort: pull the bundled rulesets from the same kantra image so the triage can scope to
+        # java-provider rules (java.referenced/java.dependency) and ignore builtin-only rules. Safe by
+        # design — if this can't find them, the triage simply compares ALL rules (today's behavior), and
+        # a version/path mismatch only ever leaves a rule UN-skipped (never masks a divergence).
+        run: |
+          set +e
+          for p in /opt/rulesets /usr/local/etc/rulesets /root/.kantra/rulesets; do
+            cid=$(podman create --name rs-extract "$KANTRA_IMAGE")
+            if podman cp "$cid:$p" /tmp/rulesets 2>/dev/null && [ -d /tmp/rulesets ]; then
+              podman rm "$cid" >/dev/null 2>&1
+              echo "Extracted rulesets from kantra image: $p"
+              break
+            fi
+            podman rm "$cid" >/dev/null 2>&1
+          done
+          if [ -d /tmp/rulesets ]; then
+            echo "rulesets .yaml count: $(find /tmp/rulesets -name '*.yaml' | wc -l)"
+          else
+            echo "WARNING: could not extract rulesets; triage will compare all rules (unscoped)."
+          fi
+          exit 0
 
       - name: Configure container networking
         run: |
@@ -93,6 +121,8 @@ jobs:
         working-directory: /tmp/koncur
         run: |
           mkdir -p /tmp/triage-reports
+          RS_ARG=""
+          [ -d /tmp/rulesets ] && RS_ARG="--rulesets /tmp/rulesets"
           overall=0
           for d in tests/*/; do
             t=$(basename "$d")
@@ -105,7 +135,7 @@ jobs:
             echo "::group::triage $t"
             python3 "$GITHUB_WORKSPACE/testing/koncur_triage.py" \
               --ledger "$GITHUB_WORKSPACE/testing/koncur-parity-ledger.yaml" \
-              --test "$t" --golden "$golden" --actual "$f" \
+              --test "$t" --golden "$golden" --actual "$f" $RS_ARG \
               | tee "/tmp/triage-reports/$t.txt"
             rc=${PIPESTATUS[0]}
             echo "::endgroup::"

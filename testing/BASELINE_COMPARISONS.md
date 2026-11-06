@@ -138,18 +138,29 @@ divergences, 0 open regressions** across the runnable corpus.
 So the only standing "failures" are **documented Go-provider bugs** (Java is more correct), and all
 three real provider regressions are fixed — two awaiting a CI environment with private-repo access.
 
-### ⚠️ This snapshot is stale vs *current* koncur
-- koncur `main` has advanced **7 commits** past the ledger baseline, and that baseline is **not an
-  ancestor** of current HEAD (an upstream-vs-fork divergence) — the pin is out of date.
-- **3 goldens changed** since: `daytrader`, `book-server-deps`, `book-server-source` (likely
-  ruleset-version bumps). The daytrader change does **not** touch our ledger rule
-  (`ee-to-quarkus-00020`), so that entry almost certainly still holds — but the golden moved ~100 lines
-  on other rules, so "0 divergences vs current koncur" can't be claimed without a re-run.
-- Ledger `ruleset_ref` / `kantra_image` / `java_provider_image` pins are still `TODO`.
+### Delta re-sync to current koncur — done (2026-11-06)
+koncur `main` had advanced 7 commits past the previous baseline, changing 3 goldens (`daytrader`,
+`book-server-deps`, `book-server-source`). Re-synced: baseline re-pinned to current koncur HEAD
+(`2d3cbea`, 2026-10-30; see the ledger `baseline` + `resync_log`), and the 3 changed tests re-triaged
+with the native provider (apps @ `ci-oct2025`), **java-provider-scoped** (`--rulesets`):
 
-**Needed to make a current claim:** a **delta re-run** — re-pin the baseline to current koncur HEAD and
-re-triage the 3 changed tests (daytrader + both book-server); ideally also close the two tomcat-legacy
-fixes in a CI env that can reach the private repo.
+| Test | Result |
+|---|---|
+| daytrader | 13 EXPLAINED (the `ee-to-quarkus-00020` go-wrong over-match), **0 unexplained** |
+| book-server-deps | **0 divergence** — 8 java incidents / 5 java rules match the golden exactly |
+| book-server-source | **0 divergence** — same |
+
+All clean against the Java provider; the golden drift was entirely builtin-provider / ruleset-version
+skew (xhtml/xml/properties/manifest), not the provider.
+
+Caveats / still open:
+- This is a **scoped local** re-sync (the install's ruleset version may differ from koncur's). The
+  authoritative confirmation is the gating workflows, which now also pass `--rulesets`.
+- `ruleset_ref` is now **pinned** (`baseline.ruleset_ref` = `quay.io/konveyor/kantra@sha256:c57b12b6…`,
+  rulesets bundled at `/opt/rulesets`); both gating workflows pin kantra + ruleset extraction to that
+  digest. Residual: koncur's own golden generation still tracks mutable `:latest`, so for a true zero-skew
+  run the goldens should be regenerated at this same digest.
+- The two **tomcat-legacy** fixes remain `fixed-pending-ci` (need a CI env that can reach the private repo).
 
 ### daytrader — first-pass delta triage (2026-11-06)
 Ran the native provider on daytrader (`ci-oct2025`, source-only, `cloud-readiness || quarkus`) and triaged
@@ -170,14 +181,17 @@ divergence is the explained `ee-to-quarkus-00020` over-match. The java-more nois
 version skew, not the provider.
 
 **Follow-ups this exposes:**
-1. **Scope the differential comparator to java-provider rules** — ✅ **implemented**: `koncur_triage.py
-   --rulesets <dir>` classifies each ruleID by its `when` capability and diffs only `java.referenced` /
-   `java.dependency` rules, skipping `builtin.*`-only rules. With it, daytrader goes from 76 unexplained to
-   **0** (only the 13 explained over-match remain). Opt-in and fail-safe (won't scope if the path yields no
-   java rules). Default (gating) CI stays unscoped/conservative until a *complete* ruleset extraction is
-   wired in — a partial extract could wrongly skip real java rules.
-2. **Pin `ruleset_ref`** (and run the native provider against the *same* analyzer/ruleset version koncur
-   used) before a clean delta re-sync.
+1. **Scope the differential comparator to java-provider rules** — ✅ **implemented + wired**:
+   `koncur_triage.py --rulesets <dir>` classifies each ruleID by its `when` capability and skips only
+   rules **confirmed** `builtin.*`-only; unknown rules are still compared, so a partial/wrong ruleset path
+   degrades to "compare all" and can never mask a divergence. With it, daytrader goes from 76 unexplained
+   to **0** (only the 13 explained over-match remain). The gating `koncur-differential.yaml` now best-effort
+   extracts the bundled rulesets from the kantra image and passes `--rulesets` (falling back to unscoped if
+   extraction fails). _(The hub workflow could get the same once its ruleset source is confirmed.)_
+2. **Pin `ruleset_ref`** — ✅ **done**: pinned to the kantra image digest that bundles the rulesets
+   (`quay.io/konveyor/kantra@sha256:c57b12b6…`, `/opt/rulesets`); both gating workflows pin kantra +
+   ruleset extraction to it. Residual: koncur regenerates goldens with mutable `:latest`, so a fully
+   zero-skew run also needs the goldens regenerated at this digest.
 
 ---
 
