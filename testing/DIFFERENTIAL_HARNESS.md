@@ -39,12 +39,12 @@ truth (Go is sometimes wrong; those are `go-wrong` ledger entries).
   non-Java tests (python/go/.NET) which validate other providers. With this scope both the CLI and Hub
   paths are clean (0 unexplained). _(Tag diffing / direction-scoping remain available if `diff_tags` is
   re-enabled — e.g. `direction: [java-more, tag-added]`.)_ **Optional java-provider scoping** (`--rulesets
-  <dir>`): classify each ruleID by its `when` capability and diff **only** rules that use the Java provider
-  (`java.referenced` / `java.dependency`), skipping `builtin.*`-only rules (file/xml/filecontent/has) whose
-  divergences reflect **ruleset/analyzer-version skew**, not the provider under test. Safe by construction —
-  if no java rules are found under the path (misconfigured), it refuses to scope and compares all rather
-  than falsely reporting clean. See `BASELINE_COMPARISONS.md` for why (the daytrader java-more bucket was
-  entirely builtin rules on `.xhtml`/`.xml`/`.properties`).
+  <dir>`): classify each ruleID by its `when` capability and **skip only rules CONFIRMED builtin-only**
+  (`builtin.*`: file/xml/filecontent/has), whose divergences reflect **ruleset/analyzer-version skew**, not
+  the provider under test. Safe by construction: a rule not found in the given rulesets has *unknown*
+  capability and is **still compared**, and an empty/wrong path scopes nothing — so a partial or wrong
+  ruleset extract degrades to "compare all" and can never mask a divergence. See `BASELINE_COMPARISONS.md`
+  for why (the daytrader java-more bucket was entirely builtin rules on `.xhtml`/`.xml`/`.properties`).
 - **`test_koncur_triage.py`** — unit tests (27) covering diff, normalization, count-based non-source
   matching, direction-aware classification, java-rule scoping, and the gate. Run:
   `cd testing && python3 -m unittest -v test_koncur_triage`.
@@ -72,7 +72,9 @@ python3 testing/koncur_triage.py \
   with the new provider (`koncur generate`), and runs `koncur_triage.py` per test. **Gating** (fails on
   any UNEXPLAINED/PENDING; a tracked `java-wrong` can be tolerated with `--allow-known`). Runs **nightly
   + on demand** (heavy, ~90 min). First real run: all 17 apps clean (daytrader 13 + seam 288 explained,
-  0 regressions).
+  0 regressions). It also best-effort extracts the bundled rulesets from the kantra image and passes
+  `--rulesets` so the triage is **java-provider-scoped** (builtin-only rule noise excluded); if extraction
+  fails it falls back to comparing all rules (unscoped) — never masking a divergence.
 - **`.github/workflows/unit-tests.yaml`** — fast **per-PR** gate (`mvn test` + the triage harness tests).
 - The stale forked-baseline `koncur-e2e` workflow has been **retired** (MTA-8152).
 - **`.github/workflows/koncur-hub-e2e.yaml`** — in-cluster (Tackle Hub) differential, **gating** (nightly +
