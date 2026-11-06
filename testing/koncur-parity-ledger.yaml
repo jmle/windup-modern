@@ -59,21 +59,32 @@ entries:
     classification: go-wrong
     direction: java-fewer
     summary: >
-      Go over-matches @MessageDriven onto unrelated EJB annotations at nearby lines
-      (@Resource, @Override, @TransactionAttribute); Java reports only real @MessageDriven usages.
-    incidents:
+      Rule ee-to-quarkus-00020 is `java.referenced {location: ANNOTATION, pattern: javax.ejb.*}` — it must
+      match only javax.ejb ANNOTATIONS. Go over-matches: it also flags non-annotation javax.ejb TYPE
+      references — `throw new EJBException(...)` constructor calls and `SessionContext` /
+      `MessageDrivenContext` field declarations. Java matches only real annotations (@Stateless,
+      @TransactionAttribute, @TransactionManagement, @EJB, @MessageDriven, ...), so it reports fewer.
+    # Descriptive only (the gate keys off test/rule/direction/classification/status, not this block).
+    # Source ref: sample.daytrader7 @ ci-oct2025. The spurious Go incidents are javax.ejb type refs:
+    spurious_go_incidents:
       - uri_contains: TradeSLSBBean.java
-        name: Override
-        lines: [160, 217, 248, 262, 268, 302, 398, 413, 546]
+        kind: field
+        type_ref: javax.ejb.SessionContext
+        lines: [102]
       - uri_contains: TradeSLSBBean.java
-        name: TransactionAttribute
-        lines: [646]
-      - uri_contains: [DTBroker3MDB.java, DTStreamer3MDB.java, TradeSLSBBean.java]
-        name: Resource
+        kind: constructor-call        # throw new EJBException(...)
+        type_ref: javax.ejb.EJBException
+        lines: [160, 217, 248, 262, 268, 302, 398, 413, 546, 646]
+      - uri_contains: [DTBroker3MDB.java, DTStreamer3MDB.java]
+        kind: field
+        type_ref: javax.ejb.MessageDrivenContext
+        lines: [53]                   # DTBroker3MDB; DTStreamer3MDB analogous (one field)
     resolution: Accept Java output; 13 spurious Go incidents (49 -> 36 for the rule).
-    evidence: FAILING_TESTS.md#2-daytrader
+    evidence: [FAILING_TESTS.md#2-daytrader, BASELINE_COMPARISONS.md]
     status: accepted
     first_seen: 2026-08-18
+    reverified: 2026-11-06   # re-run vs current golden @ ci-oct2025; prior @Override/@Resource labels
+                             # were stale (source lines shifted). Counts (49->36) and verdict unchanged.
 
   - id: seam-booking-source-only-annotation-misses
     test: seam-booking
