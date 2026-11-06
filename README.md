@@ -67,6 +67,7 @@ binary WAR/EAR) are also done and gated. Remaining work is compatibility-matrix 
 | `CASE_FOR_JAVA_PROVIDER.md` + `slides/` | The case for switching (written + deck) |
 | `TEST_PLAN.md` | Layered testing strategy + exit criteria |
 | `testing/DIFFERENTIAL_HARNESS.md` | How the differential gate works |
+| `testing/BASELINE_COMPARISONS.md` | Real-world sample-app runs + current koncur differential status |
 | `testing/PERFORMANCE.md` | Perf / robustness procedures + measured baselines |
 | `testing/koncur-parity-ledger.yaml` | Tracked record of every known provider-vs-Go difference |
 | `LOCATION_DIFFERENCES.md` | Per-`location` matching behavior vs the Go provider |
