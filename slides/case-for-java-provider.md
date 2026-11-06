@@ -220,7 +220,12 @@ diff every result vs the Go golden, classify each difference.
 - Every difference is a **known Go bug** (over/under-matching) or benign — recorded in a parity ledger
 - Comparator is base-dir / decompiler-line / ruleset-version aware, so noise ≠ regressions
 
-> Correctness is now **continuously enforced in CI**, not a one-time claim.
+**Beyond the differential — gated in CI too:**
+- Dependency parity vs `mvn dependency:tree` and real Gradle (Groovy + Kotlin-DSL, Gradle 7.6 & 9)
+- Binary WAR/EAR/JAR analysis end-to-end; gRPC contract + error-path behaviour
+- Soak / leak (long-lived server), resilience & security, perf **regression gate**
+
+> Correctness **and** robustness are now **continuously enforced in CI**, not one-time claims.
 
 ---
 
@@ -255,6 +260,7 @@ Real gap — JDTLS has incremental compilation + caching; we parse fresh. **But:
 - **96% of evaluate calls finish <10ms**; provider-side tuning netted **~0s**
 - Dominant cost is **engine-side**: multi-condition OR rules run branches **sequentially**.
   The biggest win — **parallel OR conditions** — is an engine change that **helps both providers**.
+- Guarded against *regressions*: a nightly **perf gate** fails the build on an order-of-magnitude slowdown.
 
 ---
 
@@ -265,6 +271,9 @@ Real gap — JDTLS has incremental compilation + caching; we parse fresh. **But:
 | `ENUM` location | **Done** — indexed + unit-tested |
 | BOM-import version resolution | **Done** — recursive + parent-chain; validated vs `mvn dependency:tree` |
 | Dependency `pom.xml` line numbers | **Done** — `GetDependencyLocation` RPC tested |
+| Gradle dependency resolution | **Done** — Groovy **and Kotlin-DSL**; CI across Gradle 7.6 & 9 |
+| Gradle dependency-**source** download | **Done** — the Go feature; version-aware, CI-gated |
+| Binary **WAR / EAR / JAR** analysis | **Done** — decompile + index + deps; validated on real apps |
 | Default (empty) location narrower than Go | Minor, open |
 
 The confirmed provider bugs are **fixed and regression-tested**; correctness is gated by the differential.
@@ -275,15 +284,16 @@ The confirmed provider bugs are **fixed and regression-tested**; correctness is 
 
 **Correctness** — ✅ done & **gated** (differential on CLI + Hub, 0 regressions)
 
-**Hardening (next)**
-- Performance + memory-leak / **soak** testing (long-running gRPC server)
-- **Resilience & security** (malformed inputs, corrupt archives, timeouts)
-- Gradle dependency parity; extend the matching oracle
+**Hardening** — ✅ done & **gated**
+- Soak / leak (long-lived server), resilience & security, perf **regression gate** — all in CI
+- Gradle parity (Groovy + Kotlin-DSL + source download), binary WAR/EAR, matching oracle
 
-**Performance (engine)**
-- **Parallel OR-condition evaluation** in analyzer-lsp — biggest lever, helps all providers
+**Remaining**
+- Finish the compatibility matrix — full-mode & `mvn://` across Java 8/17/21
+- Parity-ledger **sign-off** (a review step, not new code)
+- **Parallel OR-condition evaluation** in analyzer-lsp — biggest perf lever, **helps all providers**
 
-> Correctness is settled; what remains is **non-functional hardening** + a shared engine win.
+> Correctness *and* hardening are settled; what's left is matrix breadth + a shared engine win.
 
 ---
 
@@ -293,9 +303,9 @@ The confirmed provider bugs are **fixed and regression-tested**; correctness is 
 
 Adopt the native Java provider as the **go-forward Java analysis path**.
 
-Correctness is **proven and continuously gated** — differential vs koncur `main`, on CLI **and** Tackle Hub, **0 regressions**. Remaining work is **non-functional hardening** (perf, soak, resilience), not correctness.
+Correctness is **proven and continuously gated** — differential vs koncur `main`, on CLI **and** Tackle Hub, **0 regressions**. Non-functional **hardening is also done and gated** (soak, resilience, perf-regression), and **Maven + Gradle (Groovy/Kotlin-DSL) + binary** parity is covered.
 
-Prioritize the engine-side **parallel-OR** change — biggest perf win, helps everyone.
+Remaining work is **matrix breadth** + the engine-side **parallel-OR** change — biggest perf win, helps everyone.
 
 <br>
 

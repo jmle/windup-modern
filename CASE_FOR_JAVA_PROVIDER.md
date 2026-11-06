@@ -138,7 +138,13 @@ We built a **ledger-driven differential harness** (`testing/koncur_triage.py`, `
 - The comparator is base-dir-, decompiler-line-, and ruleset-version-aware, so environmental noise (e.g. hub repo-subdir prefixes, Vineflower vs fernflower line numbers) never masquerades as a regression.
 - Fast per-PR gate (`mvn test` + harness unit tests); heavy differential runs nightly.
 
-*Talking point:* Correctness is now **continuously enforced in CI**, not a one-time claim. The "we're already more correct" story (Slide 7) is automated and guarded against regression.
+**Beyond the differential, the following are also automated and CI-gated:**
+- **Dependency parity** — validated against `mvn dependency:tree` (Maven incl. multi-module + BOM) and against real Gradle for **Groovy and Kotlin-DSL** builds, run across Gradle 7.6 (pre-9) and 9.x.
+- **Binary analysis** — WAR/EAR/JAR exploded, decompiled, indexed and dependency-identified end-to-end through the gRPC stack (`GrpcBinaryAnalysisTest`), smoke-validated on real sample archives.
+- **gRPC contract & error paths** — unknown-workspace, bad Init, unknown capability, malformed condition, idempotent Stop (`GrpcContractErrorPathTest`).
+- **Robustness** — soak/leak over a long-lived server, resilience & security (malformed inputs, corrupt archives, zip-slip), and a nightly **perf regression gate**.
+
+*Talking point:* Correctness **and robustness** are now **continuously enforced in CI**, not one-time claims. The "we're already more correct" story (Slide 7) is automated and guarded against regression — and now so is the whole non-functional surface.
 
 ---
 
@@ -185,36 +191,39 @@ The gaps enumerated earlier are now fixed and regression-tested:
 | `ENUM` location | **Done** — enum type + constants indexed; unit-tested |
 | BOM-import version resolution | **Done** — recursive + parent-chain resolution; validated against `mvn dependency:tree` |
 | Dependency `pom.xml` line numbers | **Done** — `GetDependencyLocation` RPC covered by regression tests |
+| Gradle dependency resolution | **Done** — Groovy **and Kotlin-DSL**; init-script injection; CI across Gradle 7.6 & 9 |
+| Gradle dependency-**source** download | **Done** — the Go provider's feature; version-aware (pre-9 / 9+), CI-gated |
+| Binary **WAR / EAR / JAR** analysis | **Done** — explode + decompile + index + deps; validated on real sample apps |
 | Default (empty) location narrower than Go | Minor, still open — widen default search |
 | `depLabelSelector` provider-side filtering | Not required — engine filters anyway |
 
-The confirmed provider bugs (BOM resolution, line numbers) are fixed, and correctness is continuously gated by the differential (Slide 9b). The one remaining item (default-location breadth) is minor and tracked.
+The confirmed provider bugs (BOM resolution, line numbers, Gradle tree parsing, Gradle source download, Kotlin-DSL task injection) are fixed and regression-tested, and correctness is continuously gated by the differential (Slide 9b). The one remaining functional item (default-location breadth) is minor and tracked.
 
-*Talking point:* The parity gaps we were honest about are closed; what's left is non-functional hardening, not correctness.
+*Talking point:* The parity gaps we were honest about are closed — including full Gradle (Groovy + Kotlin-DSL + source download) and binary WAR/EAR, which the Go provider handled. What's left is matrix breadth, not core correctness.
 
 ---
 
 ## Slide 12 — Roadmap: what's left
 
 - **Correctness:** ✅ done and **gated** — differential vs koncur `main` on CLI + Tackle Hub, 0 regressions.
-- **Hardening (next, the real remaining work):**
-  - Performance + memory-leak / **soak** testing (long-running gRPC server; verify `Stop` cleans up).
-  - **Resilience & security** (malformed inputs, corrupt archives, timeouts, offline/proxy).
-  - Gradle dependency parity; extend the synthetic matching oracle.
-- **Performance (engine):** **parallel OR-condition evaluation** in `analyzer-lsp` — biggest lever, helps all providers.
-- **Launch tuning:** `jvmArgs`/`launchArgs` passthrough (ZGC already wired via Dockerfile).
+- **Hardening:** ✅ done and **gated** — soak/leak, resilience & security, perf **regression gate**; Gradle parity (Groovy + Kotlin-DSL + source download), binary WAR/EAR, extended matching oracle.
+- **Remaining:**
+  - Finish the **compatibility matrix** — full-mode & `mvn://` across Java 8/17/21 bytecode.
+  - **Parity-ledger sign-off** — a review step, not new code.
+  - **Parallel OR-condition evaluation** in `analyzer-lsp` — biggest perf lever, helps all providers.
+  - **Launch tuning:** `jvmArgs`/`launchArgs` passthrough (ZGC already wired via Dockerfile).
 
-*Talking point:* Correctness is settled; the remaining work is non-functional hardening plus a shared engine win — none of it reworks the architecture.
+*Talking point:* Correctness **and** hardening are settled and gated; the remaining work is matrix breadth plus a shared engine win — none of it reworks the architecture.
 
 ---
 
 ## Slide 13 — The ask
 
 - Adopt the native Java provider as the **go-forward Java analysis path**.
-- Correctness is **proven and continuously gated** — differential vs koncur `main`, on CLI **and** Tackle Hub, with **0 regressions**. The remaining work is **non-functional hardening** (perf, soak, resilience), not correctness.
-- Prioritize the **engine-side parallel-OR change** in `analyzer-lsp` — biggest perf win, helps everyone.
+- Correctness is **proven and continuously gated** — differential vs koncur `main`, on CLI **and** Tackle Hub, with **0 regressions**. Non-functional **hardening is also done and gated** (soak, resilience, perf-regression), and **Maven + Gradle (Groovy/Kotlin-DSL) + binary** parity is covered.
+- Remaining work is **compatibility-matrix breadth** (full-mode, `mvn://`, bytecode spread) plus the **engine-side parallel-OR change** in `analyzer-lsp` — biggest perf win, helps everyone.
 
-**Net:** one language, one repo, one process; matching we own and have **proven** correct and keep gated; a smaller, more stable footprint — with correctness settled and a clear hardening path.
+**Net:** one language, one repo, one process; matching we own and have **proven** correct and keep gated; a smaller, more stable footprint — with correctness *and* hardening settled and only matrix breadth plus a shared engine win left.
 
 ---
 
