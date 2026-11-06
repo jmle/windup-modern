@@ -9,6 +9,7 @@ import io.konveyor.provider.buildtool.DependencyCache;
 import io.konveyor.provider.buildtool.DependencyLabeler;
 import io.konveyor.provider.buildtool.DependencyResolver;
 import io.konveyor.provider.buildtool.GradleBuildTool;
+import io.konveyor.provider.buildtool.MavenBuildTool;
 import io.konveyor.provider.decompiler.ArchiveHandler;
 import io.konveyor.provider.decompiler.VineflowerDecompiler;
 import io.konveyor.provider.grpc.*;
@@ -150,6 +151,25 @@ public class WorkspaceContext {
             } else {
                 resolvedDag = buildTool.getDependenciesDAG(root);
                 resolvedDeps = BuildTool.flattenDag(resolvedDag);
+
+                // Build-tool fallback: a project may ship BOTH a Gradle and a Maven build file. The
+                // detector picks one; if it resolves nothing (e.g. a Gradle toolchain/env failure), try
+                // the other before degrading to static parsing. See testing/BASELINE_COMPARISONS.md
+                // (petclinic: Gradle resolution failed on a missing Java-17 toolchain; Maven would work).
+                if (resolvedDeps.isEmpty()) {
+                    BuildTool alt = alternativeBuildTool(root, buildTool.getType());
+                    if (alt != null) {
+                        LOG.info("{} resolved 0 dependencies; falling back to {} for workspace {}",
+                                buildTool.getType(), alt.getType(), id);
+                        List<BuildTool.DagEntry> altDag = alt.getDependenciesDAG(root);
+                        if (!BuildTool.flattenDag(altDag).isEmpty()) {
+                            buildTool = alt;
+                            resolvedDag = altDag;
+                            resolvedDeps = BuildTool.flattenDag(altDag);
+                        }
+                    }
+                }
+
                 if (cache != null) cache.store(resolvedDag);
                 LOG.info("Resolved {} dependencies ({} top-level) via {} for workspace {}",
                         resolvedDeps.size(), resolvedDag.size(), buildTool.getType(), id);
@@ -179,6 +199,22 @@ public class WorkspaceContext {
         if (Files.exists(gradle)) return gradle;
         Path gradleKts = root.resolve("build.gradle.kts");
         if (Files.exists(gradleKts)) return gradleKts;
+        return null;
+    }
+
+    /**
+     * The other build tool to try when the detected one resolves nothing, iff its build file is also
+     * present (a project can ship both pom.xml and build.gradle). Returns {@code null} when there is no
+     * alternative (binary input, or only one build system present).
+     */
+    static BuildTool alternativeBuildTool(Path root, BuildTool.Type detected) {
+        if (detected == BuildTool.Type.GRADLE && Files.exists(root.resolve("pom.xml"))) {
+            return new MavenBuildTool();
+        }
+        if (detected == BuildTool.Type.MAVEN
+                && (Files.exists(root.resolve("build.gradle")) || Files.exists(root.resolve("build.gradle.kts")))) {
+            return new GradleBuildTool();
+        }
         return null;
     }
 
