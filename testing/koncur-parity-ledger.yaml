@@ -25,9 +25,14 @@ baseline:
   prior_koncur_go_ref: 5ce4fb0ffd4fab2a7e4474ac15b8c00368d763a5  # previous baseline @ 2026-10-20
   prior_triage_merge_base: 70eee774c3180c27d8a296645de040fc64512bfc
   forked_golden_branch_tip: 002c902ede9d3fe5f08ab96d0e5dacc7dc2112a9  # to retire (MTA-8152)
-  ruleset_ref: TODO            # pin analyzer-lsp / rulesets version used for the run
-  kantra_image: TODO           # pin to a digest, not :latest
-  java_provider_image: TODO    # tag/digest of the provider under test
+  # Rulesets are bundled in the kantra image at /opt/rulesets; koncur generates goldens with
+  # quay.io/konveyor/kantra:latest (CI image_tag defaults to "latest" on main). Pinned to the digest
+  # "latest" resolved to on 2026-11-06 so the ruleset version is reproducible. NOTE: koncur's own golden
+  # generation tracks mutable :latest, so for a zero-skew run the goldens should be regenerated at this
+  # same digest; our differential/hub workflows pin kantra + ruleset extraction to it.
+  ruleset_ref: quay.io/konveyor/kantra@sha256:c57b12b64809017b8f8099da41f908e970343d79fda66f72409cc0aa23e9d3b2
+  kantra_image: quay.io/konveyor/kantra@sha256:c57b12b64809017b8f8099da41f908e970343d79fda66f72409cc0aa23e9d3b2
+  java_provider_image: built-from-source per run (Dockerfile.kantra -> localhost/java-provider:test)
 
 # Delta re-sync log (newest first). A re-sync re-runs only the tests whose golden changed and carries
 # forward unchanged entries; see TEST_PLAN.md L4 / BASELINE_COMPARISONS.md.
