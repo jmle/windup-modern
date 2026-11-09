@@ -158,6 +158,18 @@ with the native provider (apps @ `ci-oct2025`), **java-provider-scoped** (`--rul
 All clean against the Java provider; the golden drift was entirely builtin-provider / ruleset-version
 skew (xhtml/xml/properties/manifest), not the provider.
 
+### First authoritative hub run (2026-11-09)
+Dispatched the gating `koncur-hub-e2e.yaml` on `main` (in-cluster Tackle Hub, vs vanilla koncur `main`).
+Result: **success** — `--rulesets` extraction worked on the Hub path (`/opt/rulesets`, 556 files; scoping
+1543 java / 3375 total), and the ledger-driven triage was **0 UNEXPLAINED / 0 PENDING / 0 KNOWN_BUG**
+across all Java tests (EXPLAINED = the accepted go-wrong cases: daytrader 13, seam 277, …). The 4
+`tackle-testapp-*` tests that `koncur generate` reported as "failed" were **not provider failures** — they
+set `requireMavenSettings: true`: their deps (`io.konveyor.demo:*`) aren't on Central, so koncur serves
+them from a **committed** `local-maven-resources` dir over HTTP with a mirror settings.xml (no GitHub
+auth). Both workflows now replicate that (serve `local-maven-resources` + generate the mirror
+`settings.xml` + set `mavenSettings` in the target config), mirroring koncur's own kantra/hub CI, so those
+tests run instead of being skipped. (Pending a confirming run.)
+
 Caveats / still open:
 - This is a **scoped local** re-sync (the install's ruleset version may differ from koncur's). The
   authoritative confirmation is the gating workflows, which now also pass `--rulesets`.
