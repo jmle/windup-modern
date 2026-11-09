@@ -162,6 +162,31 @@ public class SymbolCollector extends ASTVisitor {
     }
 
     // ------------------------------------------------------------------
+    // Record declarations (Java 16+) — a `record` is a type like a class.
+    // Without this, records (common in modern bytecode) are never indexed
+    // as TYPE/CLASS, so referenced rules miss them. (MTA-8159)
+    // ------------------------------------------------------------------
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public boolean visit(RecordDeclaration node) {
+        String simpleName = node.getName().getIdentifier();
+        String fqn = packageName.isEmpty() ? simpleName : packageName + "." + simpleName;
+
+        List<IndexedSymbol.AnnotationInfo> annots = collectAnnotations(node);
+        addSymbol(fqn, simpleName, SymbolKind.CLASS, LocationType.CLASS, node.getName(), annots);
+        addSymbol(fqn, simpleName, SymbolKind.CLASS, LocationType.TYPE, node.getName(), annots);
+
+        // Records can implement interfaces (they implicitly extend java.lang.Record).
+        for (Type iface : (List<Type>) node.superInterfaceTypes()) {
+            for (String resolved : resolveTypeName(typeToString(iface))) {
+                addSymbol(resolved, simpleName, SymbolKind.CLASS, LocationType.IMPLEMENTS_TYPE, iface);
+            }
+        }
+        return true;
+    }
+
+    // ------------------------------------------------------------------
     // Enum declarations
     // ------------------------------------------------------------------
 

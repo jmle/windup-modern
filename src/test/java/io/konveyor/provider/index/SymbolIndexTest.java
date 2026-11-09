@@ -90,8 +90,21 @@ class SymbolIndexTest {
                 }
                 """);
 
+        Files.writeString(srcDir.resolve("Coordinate.java"), """
+                package com.example.apps;
+
+                public record Coordinate(int x, int y) {}
+                """);
+
         index = new SymbolIndex();
         index.indexDirectory(tempDir);
+    }
+
+    @Test
+    void indexesRecordAsType() {
+        // records (Java 16+) must be indexed as TYPE/CLASS like any other type (MTA-8159)
+        assertThat(index.query("com.example.apps.Coordinate", LocationType.TYPE)).isNotEmpty();
+        assertThat(index.query("com.example.apps.Coordinate", LocationType.CLASS)).isNotEmpty();
     }
 
     @Test
