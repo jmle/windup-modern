@@ -84,9 +84,16 @@ public class MavenArtifactDownloader {
         RepositorySystem system = locator.getService(RepositorySystem.class);
 
         DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
-        Path localRepoPath = Path.of(System.getProperty("user.home"), ".m2", "repository");
+        // Honor the configured local cache (set from the `mavenCacheDir` provider config via
+        // `maven.repo.local`); fall back to the default ~/.m2/repository.
+        String localRepoProp = System.getProperty("maven.repo.local");
+        Path localRepoPath = (localRepoProp != null && !localRepoProp.isEmpty())
+                ? Path.of(localRepoProp)
+                : Path.of(System.getProperty("user.home"), ".m2", "repository");
         LocalRepository localRepo = new LocalRepository(localRepoPath.toFile());
         session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
+        // Air-gapped / offline support: resolve only from the local cache when requested.
+        session.setOffline(Boolean.getBoolean("maven.offline"));
 
         String extension = "jar";
         String coordsStr = coords.groupId() + ":" + coords.artifactId() + ":" + extension

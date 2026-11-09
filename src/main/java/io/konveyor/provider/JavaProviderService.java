@@ -71,6 +71,12 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
         LOG.info("Init workspace id={} location={} mode={}", id, location, analysisMode);
 
         try {
+            // Apply proxy + Maven settings (custom cache dir, etc.) BEFORE any mvn:// download so they
+            // govern that download too (air-gapped / proxied / custom-cache environments).
+            configureProxy(request);
+            configureMavenSettings(request);
+            configureEncoding(request);
+
             Path mvnWorkDir = null;
             if (MavenArtifactDownloader.isMvnUri(location)) {
                 MavenArtifactDownloader downloader = new MavenArtifactDownloader();
@@ -79,10 +85,6 @@ public class JavaProviderService extends ProviderServiceGrpc.ProviderServiceImpl
                 location = downloaded.toString();
                 LOG.info("Downloaded mvn artifact to {}", location);
             }
-
-            configureProxy(request);
-            configureMavenSettings(request);
-            configureEncoding(request);
 
             WorkspaceContext ctx = new WorkspaceContext(id, location, analysisMode, request, contextLines);
             if (mvnWorkDir != null) {
