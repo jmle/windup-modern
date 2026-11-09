@@ -12,6 +12,12 @@ on:
   schedule:
     - cron: '41 3 * * *'
 
+# One differential run at a time: a manual dispatch supersedes an in-flight nightly instead of running
+# two in parallel.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
   koncur-differential:
     runs-on: ubuntu-24.04
