@@ -196,4 +196,29 @@ class GradleBuildToolTest {
         assertThat(find(deps, "lib").indirect()).isFalse();
         assertThat(find(deps, "slf4j-api").indirect()).isFalse();
     }
+
+    // ── toolchainFailureHint (D2: clear message instead of silent degradation) ────────────────────
+
+    @Test
+    void toolchainHintDetectsMissingToolchainWithVersion() {
+        String hint = GradleBuildTool.toolchainFailureHint(List.of(
+                "Cannot find a Java installation on your machine matching: "
+                        + "{languageVersion=17, vendor=any vendor, implementation=vendor-specific}"));
+        assertThat(hint).isNotNull();
+        assertThat(hint).contains("languageVersion=17");
+        assertThat(hint).contains("org.gradle.java.installations.paths");
+    }
+
+    @Test
+    void toolchainHintDetectsNoCompatibleToolchains() {
+        assertThat(GradleBuildTool.toolchainFailureHint(List.of("No compatible toolchains found")))
+                .isNotNull();
+    }
+
+    @Test
+    void toolchainHintNullForUnrelatedFailure() {
+        assertThat(GradleBuildTool.toolchainFailureHint(List.of(
+                "Could not resolve com.example:thing:1.0", "Connection refused"))).isNull();
+        assertThat(GradleBuildTool.toolchainFailureHint(List.of())).isNull();
+    }
 }

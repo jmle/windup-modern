@@ -69,4 +69,32 @@ class WorkspaceContextTest {
         // binary analysis never falls back to a source build tool
         assertThat(WorkspaceContext.alternativeBuildTool(dir, BuildTool.Type.BINARY)).isNull();
     }
+
+    // ── mavenIndexFileFrom (D3: kantra passes the install DIR, not the file) ──────────────────────
+
+    @Test
+    void mavenIndexResolvesFileInsideDirectory() throws Exception {
+        Files.writeString(dir.resolve("maven-index.txt"), "x");
+        assertThat(WorkspaceContext.mavenIndexFileFrom(dir.toString()))
+                .isEqualTo(dir.resolve("maven-index.txt"));
+    }
+
+    @Test
+    void mavenIndexDirectoryWithoutFileIsNull() {
+        assertThat(WorkspaceContext.mavenIndexFileFrom(dir.toString())).isNull();
+    }
+
+    @Test
+    void mavenIndexAcceptsDirectFilePath() throws Exception {
+        Path f = dir.resolve("custom-index.txt");
+        Files.writeString(f, "x");
+        assertThat(WorkspaceContext.mavenIndexFileFrom(f.toString())).isEqualTo(f);
+    }
+
+    @Test
+    void mavenIndexNullOrMissingIsNull() {
+        assertThat(WorkspaceContext.mavenIndexFileFrom(null)).isNull();
+        assertThat(WorkspaceContext.mavenIndexFileFrom("")).isNull();
+        assertThat(WorkspaceContext.mavenIndexFileFrom(dir.resolve("nope.txt").toString())).isNull();
+    }
 }

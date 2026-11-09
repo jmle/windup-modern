@@ -310,13 +310,22 @@ public class GradleBuildTool implements BuildTool {
             }
 
             if (process.exitValue() != 0) {
+                List<String> errLines = new ArrayList<>();
                 try (BufferedReader err = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
                     String errLine;
                     while ((errLine = err.readLine()) != null) {
+                        errLines.add(errLine);
                         LOG.debug("Gradle stderr: {}", errLine);
                     }
                 }
-                LOG.warn("Gradle command exited with code {}: {}", process.exitValue(), String.join(" ", command));
+                String hint = toolchainFailureHint(errLines);
+                if (hint != null) {
+                    LOG.warn("Gradle could not configure the project: {} Gradle dependency resolution will be "
+                            + "skipped (the provider falls back to another build tool, or to static parsing). "
+                            + "Command: {}", hint, String.join(" ", command));
+                } else {
+                    LOG.warn("Gradle command exited with code {}: {}", process.exitValue(), String.join(" ", command));
+                }
             }
 
             return output;
@@ -327,5 +336,29 @@ public class GradleBuildTool implements BuildTool {
             Thread.currentThread().interrupt();
             return List.of();
         }
+    }
+
+    private static final Pattern TOOLCHAIN_VERSION = Pattern.compile("languageVersion=(\\d+)");
+
+    /**
+     * If the Gradle stderr indicates a Java-toolchain configuration failure (common when a project pins a
+     * toolchain JDK that isn't installed, which blocks the whole build from configuring), return a concise
+     * actionable hint; otherwise {@code null}. Used to turn a silent degradation into a clear warning.
+     */
+    static String toolchainFailureHint(List<String> stderrLines) {
+        for (String line : stderrLines) {
+            if (line.contains("Cannot find a Java installation") && line.contains("languageVersion")) {
+                Matcher m = TOOLCHAIN_VERSION.matcher(line);
+                String ver = m.find() ? m.group(1) : "the required version";
+                return "no matching Java toolchain (languageVersion=" + ver + ") is available; install that "
+                        + "JDK or set org.gradle.java.installations.paths.";
+            }
+            if (line.contains("No compatible toolchains found")
+                    || line.contains("No locally installed toolchains match")) {
+                return "no compatible Java toolchain found; install the required JDK or configure "
+                        + "org.gradle.java.installations.paths.";
+            }
+        }
+        return null;
     }
 }
