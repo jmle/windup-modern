@@ -108,13 +108,16 @@ Noise (not provider bugs): dozens of `failed to query xml file … processes.xml
 - **Pick the right target/app to exercise a ruleset:** a `spring-boot3` run only lights up on an app
   that's actually on **Spring Boot 2.x** — not 1.x (too old) and not already-4.x (too new).
 
-### Open improvements (surfaced by these runs)
-1. **Build-tool fallback** — if the detected tool resolves 0 deps and another build file exists, try
-   that tool before static parsing (petclinic finding #2).
-2. **Gradle toolchain resilience** — detect "no matching toolchain" and degrade with a clear warning (or
-   configure `org.gradle.java.installations.paths`) instead of silently losing resolution (finding #1).
-3. **`mavenIndexPath` as directory** — accept the kantra-style directory and resolve `maven-index.txt`
-   within it (finding #4).
+### Improvements (surfaced by these runs)
+1. **Build-tool fallback** — ✅ **done**: if the detected tool resolves 0 deps and another build file
+   exists, the provider retries with the other tool before static parsing (`alternativeBuildTool`,
+   petclinic finding #2).
+2. **Gradle toolchain resilience** — ✅ **done**: `GradleBuildTool` now detects the "no matching Java
+   toolchain" configuration failure and logs a clear, actionable warning (install the JDK / set
+   `org.gradle.java.installations.paths`) instead of silently losing resolution; combined with #1 it then
+   falls back to Maven (or static). Fundamentally fixing a missing JDK is an operator action (finding #1).
+3. **`mavenIndexPath` as directory** — ✅ **done**: `mavenIndexFileFrom` accepts the kantra-style install
+   directory and resolves `maven-index.txt` within it (finding #4).
 4. **Rebuild the kantra-install jar from current `main`** to include PR #19 (no build-file mutation) and
    PR #20.
 

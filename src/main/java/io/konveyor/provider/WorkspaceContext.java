@@ -121,11 +121,8 @@ public class WorkspaceContext {
     }
 
     private Path resolveMavenIndexPath() {
-        String mavenIndexPathStr = extractStringConfig(config, "mavenIndexPath");
-        if (mavenIndexPathStr != null) {
-            Path configPath = Path.of(mavenIndexPathStr);
-            if (Files.exists(configPath)) return configPath;
-        }
+        Path fromConfig = mavenIndexFileFrom(extractStringConfig(config, "mavenIndexPath"));
+        if (fromConfig != null) return fromConfig;
         if (Files.exists(DEFAULT_MAVEN_INDEX_PATH)) return DEFAULT_MAVEN_INDEX_PATH;
         Path cwdIndex = Path.of("maven-index.txt").toAbsolutePath();
         if (Files.exists(cwdIndex)) return cwdIndex;
@@ -136,6 +133,22 @@ public class WorkspaceContext {
             if (Files.exists(jarSibling)) return jarSibling;
         } catch (Exception ignored) {}
         return null;
+    }
+
+    /**
+     * Resolve the configured {@code mavenIndexPath} to the index FILE. kantra passes the install
+     * DIRECTORY (its providerSpecificConfig), so when the path is a directory we look for
+     * {@code maven-index.txt} inside it; a path that is already the file is used as-is. Returns
+     * {@code null} if nothing usable is found.
+     */
+    static Path mavenIndexFileFrom(String configured) {
+        if (configured == null || configured.isEmpty()) return null;
+        Path p = Path.of(configured);
+        if (Files.isDirectory(p)) {
+            Path inside = p.resolve("maven-index.txt");
+            return Files.exists(inside) ? inside : null;
+        }
+        return Files.exists(p) ? p : null;
     }
 
     private void resolveDependenciesBackground(Path root) {
