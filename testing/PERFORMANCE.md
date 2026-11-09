@@ -36,12 +36,12 @@ the pool finishes (no deadlock).
 
 **Run:** `mvn -Dtest=WorkspaceConcurrencyTest test`
 
-## Phase 3 — Performance baseline (advisory)
+## Phase 3 — Performance baseline (advisory + nightly regression gate)
 
 ### Symbol-index micro-benchmark (repeatable)
 
 **Test:** `PerfBenchmarkTest` — generates a synthetic corpus, then measures index time, heap, and query
-latency. Opt-in (not part of the gate):
+latency. Opt-in (not part of the per-PR gate):
 
 ```
 mvn -Dperf=true -Dtest=PerfBenchmarkTest test
@@ -50,7 +50,21 @@ mvn -Dperf=true -Dtest=PerfBenchmarkTest test
 ```
 
 **CI:** `.github/workflows/nightly-benchmarks.yaml` (`perf` job) runs this nightly + on demand and uploads
-the report, so the baseline is tracked over time (advisory — not a per-PR gate).
+the report, so the baseline is tracked over time. It runs with `-Dperf.gate=true`, a **nightly
+gross-regression gate**: the benchmark asserts the metrics stay under deliberately loose ceilings
+(several times the local baseline) so a noisy/slower runner still passes but an order-of-magnitude /
+algorithmic regression fails the build. It is **not** a per-PR gate (CI perf numbers are too noisy to
+block PRs) and does **not** gate on small deltas.
+
+Ceilings (override via system property):
+
+| Metric | Property | Default ceiling | Baseline |
+|---|---|---|---|
+| Index throughput | `perf.budget.msPerFile` | 3.0 ms/file | ~0.27 |
+| Query p95 latency | `perf.budget.p95Us` | 5000 µs | ~610 |
+| Heap after index | `perf.budget.heapMb` | 256 MB | ~13 |
+
+Run the gate locally: `mvn -Dperf=true -Dperf.gate=true -Dtest=PerfBenchmarkTest test`.
 
 **Baseline** (local dev machine, JDK 21 — *indicative, for trend not absolute gating*):
 
@@ -107,6 +121,7 @@ live workspaces 0 throughout; RSS crept 184→212 MB (bounded, native/JIT warm-u
 |---|---|
 | Temp-dir cleanup on Stop / no accumulation | **hard** (per-PR) |
 | Concurrency correctness / no deadlock | **hard** (per-PR) |
-| Index/query latency, memory | advisory (nightly trend — `nightly-benchmarks.yaml`) |
+| Index/query latency, memory: gross/algorithmic regression | **hard** (nightly, generous ceilings — `nightly-benchmarks.yaml -Dperf.gate=true`) |
+| Index/query latency, memory: small deltas / trend | advisory (nightly report) |
 | Soak: workspace registry / threads / heap bounded over many cycles | **hard** (nightly) |
 | Soak: heap/RSS/thread trend | advisory (nightly report) |
