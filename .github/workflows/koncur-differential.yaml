@@ -114,6 +114,20 @@ jobs:
             javaProviderImage: localhost/java-provider:test
           EOF
 
+      - name: Exclude tests requiring a Maven dep-server (not replicated here)
+        # Tests with `requireMavenSettings: true` (the tackle-testapp-* set) need koncur's local Maven
+        # repository server + a mirror settings.xml, since their deps aren't on Central. That infra isn't
+        # stood up here (it's exercised by koncur's own provider CI), and `koncur generate` has no
+        # skip-maven flag — it just marks them failed. Drop them so the differential stays truthful.
+        working-directory: /tmp/koncur
+        run: |
+          for d in tests/*/; do
+            if grep -q "requireMavenSettings: true" "$d/test.yaml" 2>/dev/null; then
+              echo "Excluding (requires maven dep-server infra): $(basename "$d")"
+              rm -rf "$d"
+            fi
+          done
+
       - name: Regenerate outputs with the new provider
         working-directory: /tmp/koncur
         env:
