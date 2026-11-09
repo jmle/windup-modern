@@ -127,6 +127,10 @@ then retire it (MTA-8152). koncur image override: `javaProvider:` / `JAVA_PROVID
 - **Tackle Hub in-cluster** (koncur patches the Tackle CR image) — the production path.
 - **Compatibility matrix:** kantra/analyzer versions × Java 8/17/21 bytecode × Maven (multi-module + BOM)
   / Gradle (Groovy + KTS) × source-only / full / binary (WAR/EAR/JAR) / `mvn://`.
+  - **Bytecode spread:** `BytecodeSpreadTest` compiles the same source at each `--release` the JDK supports
+    (8…21), decompiles + indexes each, and asserts identical symbols — a legacy and a modern jar look the
+    same. (Surfaced + fixed a gap: Java 16+ `record` types weren't indexed; `SymbolCollector` now handles
+    `RecordDeclaration`.)
 
 ---
 
