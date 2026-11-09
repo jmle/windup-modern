@@ -25,21 +25,22 @@ class MavenArtifactDownloaderTest {
     }
 
     @Test
-    void parsesGroupArtifactVersion() {
+    void parsesGroupArtifactVersionDefaultsToJar() {
         MvnCoordinates c = MavenArtifactDownloader.parseUri("mvn://com.example:foo:1.2.3");
         assertThat(c.groupId()).isEqualTo("com.example");
         assertThat(c.artifactId()).isEqualTo("foo");
         assertThat(c.version()).isEqualTo("1.2.3");
-        assertThat(c.classifier()).isNull();
+        assertThat(c.type()).isEqualTo("jar");
         assertThat(c.outputDir()).isNull();
     }
 
     @Test
-    void parsesClassifierAndOutputDir() {
-        MvnCoordinates c = MavenArtifactDownloader.parseUri("mvn://com.example:foo:1.0:sources@/tmp/out");
-        assertThat(c.classifier()).isEqualTo("sources");
+    void parsesTypeAndOutputDir() {
+        // the 4th segment is the artifact TYPE/packaging (war/ear/jar), per the Go provider convention
+        MvnCoordinates c = MavenArtifactDownloader.parseUri("mvn://io.konveyor.demo:customers-tomcat:0.0.1:war@/tmp/out");
+        assertThat(c.type()).isEqualTo("war");
         assertThat(c.outputDir()).isEqualTo(Path.of("/tmp/out"));
-        assertThat(c.version()).isEqualTo("1.0");
+        assertThat(c.version()).isEqualTo("0.0.1");
     }
 
     @Test
@@ -71,6 +72,36 @@ class MavenArtifactDownloaderTest {
             assertThat(out).exists();
             assertThat(out.getFileName().toString()).isEqualTo("foo-1.0.jar");
             assertThat(Files.readString(out)).isEqualTo("dummy-jar-bytes");
+        } finally {
+            restore("maven.repo.local", savedRepo);
+            restore("maven.offline", savedOffline);
+        }
+    }
+
+    @Test
+    void downloadsWarArtifactOffline(@TempDir Path tmp) throws Exception {
+        // a :war mvn:// URI must fetch the .war (not hardcode .jar) — regression for tackle-testapp-binary
+        Path repo = tmp.resolve("m2");
+        Path artDir = repo.resolve("io/konveyor/demo/customers-tomcat/0.0.1");
+        Files.createDirectories(artDir);
+        Files.writeString(artDir.resolve("customers-tomcat-0.0.1.war"), "dummy-war-bytes");
+        Files.writeString(artDir.resolve("customers-tomcat-0.0.1.pom"),
+                "<project><modelVersion>4.0.0</modelVersion><groupId>io.konveyor.demo</groupId>"
+                        + "<artifactId>customers-tomcat</artifactId><version>0.0.1</version>"
+                        + "<packaging>war</packaging></project>");
+
+        String savedRepo = System.getProperty("maven.repo.local");
+        String savedOffline = System.getProperty("maven.offline");
+        try {
+            System.setProperty("maven.repo.local", repo.toString());
+            System.setProperty("maven.offline", "true");
+
+            Path out = new MavenArtifactDownloader()
+                    .download("mvn://io.konveyor.demo:customers-tomcat:0.0.1:war", tmp.resolve("work"));
+
+            assertThat(out).exists();
+            assertThat(out.getFileName().toString()).isEqualTo("customers-tomcat-0.0.1.war");
+            assertThat(Files.readString(out)).isEqualTo("dummy-war-bytes");
         } finally {
             restore("maven.repo.local", savedRepo);
             restore("maven.offline", savedOffline);
