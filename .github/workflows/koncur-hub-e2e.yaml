@@ -127,30 +127,38 @@ jobs:
           echo "Hub API never became ready"
           exit 1
 
+      # Serve koncur's committed local-maven-resources (the tackle-testapp deps, not on Central) so
+      # `requireMavenSettings` tests can resolve them from inside the cluster — mirrors koncur's own
+      # hub.yaml (no GitHub auth). Port 8082 is in the operator's egress NetworkPolicy allow-list set up
+      # by `make hub-install`, so the analyzer addon pod can reach it via the Kind gateway.
+      - name: Serve local-maven-resources + compute Kind gateway
+        run: |
+          nohup python3 -m http.server 8082 --directory /tmp/koncur/local-maven-resources \
+            > /tmp/maven-httpd.log 2>&1 &
+          for i in $(seq 1 10); do curl -sf http://localhost:8082/ >/dev/null && break || sleep 1; done
+          GATEWAY=$(docker exec koncur-test-control-plane ip route | awk '/default/{print $3}')
+          echo "KIND_GATEWAY=$GATEWAY" >> "$GITHUB_ENV"
+          echo "Kind gateway: $GATEWAY ; maven jars: $(find /tmp/koncur/local-maven-resources -name '*.jar' | wc -l)"
+
+      - name: Create maven settings file
+        uses: s4u/maven-settings-action@v4.0.0
+        with:
+          githubServer: false
+          repositories: '[{"id": "tackle-testapp-public", "name": "Local tackle-testapp repo", "url": "http://${{ env.KIND_GATEWAY }}:8082"}]'
+          mirrors: '[{"id": "maven-default-http-blocker", "name": "disable http block", "mirrorOf": "tackle-testapp-public", "url": "http://${{ env.KIND_GATEWAY }}:8082", "blocked": false}]'
+          path: ${{ runner.temp }}/settings.xml
+
       - name: Create tackle-hub target config
         run: |
           mkdir -p /tmp/koncur/.koncur/config
-          cat > /tmp/koncur/.koncur/config/target-tackle-hub.yaml << 'EOF'
+          cat > /tmp/koncur/.koncur/config/target-tackle-hub.yaml << EOF
           type: tackle-hub
           tackleHub:
             url: http://localhost:8081
+            mavenSettings: ${{ runner.temp }}/settings.xml
             images:
               javaProvider: localhost/java-provider:test
           EOF
-
-      - name: Exclude tests requiring a Maven dep-server (not replicated here)
-        # Tests with `requireMavenSettings: true` (the tackle-testapp-* set) need koncur's local Maven
-        # repository server + a mirror settings.xml, since their deps aren't on Central. That infra isn't
-        # stood up here (it's exercised by koncur's own provider CI), and `koncur generate` has no
-        # skip-maven flag — it just marks them failed. Drop them so the differential stays truthful.
-        working-directory: /tmp/koncur
-        run: |
-          for d in tests/*/; do
-            if grep -q "requireMavenSettings: true" "$d/test.yaml" 2>/dev/null; then
-              echo "Excluding (requires maven dep-server infra): $(basename "$d")"
-              rm -rf "$d"
-            fi
-          done
 
       - name: Regenerate outputs with the new provider (via Hub)
         working-directory: /tmp/koncur
