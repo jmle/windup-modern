@@ -33,8 +33,11 @@ public class MavenArtifactDownloader {
         return location != null && location.startsWith(MVN_URI_PREFIX);
     }
 
+    // mvn://<group>:<artifact>:<version>[:<type>]@<path> — the optional 4th segment is the artifact
+    // TYPE / packaging (jar, war, ear, …), matching the Go provider's `mvn dependency:copy` convention
+    // (it names the output <artifact>-<version>.<type>). Defaults to "jar".
     public record MvnCoordinates(String groupId, String artifactId, String version,
-                                  String classifier, Path outputDir) {}
+                                  String type, Path outputDir) {}
 
     public static MvnCoordinates parseUri(String uri) {
         String stripped = uri.substring(MVN_URI_PREFIX.length());
@@ -51,8 +54,8 @@ public class MavenArtifactDownloader {
             throw new IllegalArgumentException("mvn:// URI requires at least groupId:artifactId:version, got: " + uri);
         }
 
-        String classifier = parts.length >= 4 ? parts[3] : null;
-        return new MvnCoordinates(parts[0], parts[1], parts[2], classifier, outputDir);
+        String type = (parts.length >= 4 && !parts[3].isEmpty()) ? parts[3].toLowerCase() : "jar";
+        return new MvnCoordinates(parts[0], parts[1], parts[2], type, outputDir);
     }
 
     public Path download(String mvnUri, Path workDir) throws IOException {
@@ -64,9 +67,7 @@ public class MavenArtifactDownloader {
 
         try {
             Path resolvedFile = resolveArtifact(coords);
-            String fileName = coords.artifactId() + "-" + coords.version()
-                    + (coords.classifier() != null && !"jar".equals(coords.classifier()) ? "-" + coords.classifier() : "")
-                    + ".jar";
+            String fileName = coords.artifactId() + "-" + coords.version() + "." + coords.type();
             Path destination = targetDir.resolve(fileName);
             Files.copy(resolvedFile, destination, StandardCopyOption.REPLACE_EXISTING);
             LOG.info("Downloaded artifact to {}", destination);
@@ -95,9 +96,8 @@ public class MavenArtifactDownloader {
         // Air-gapped / offline support: resolve only from the local cache when requested.
         session.setOffline(Boolean.getBoolean("maven.offline"));
 
-        String extension = "jar";
-        String coordsStr = coords.groupId() + ":" + coords.artifactId() + ":" + extension
-                + (coords.classifier() != null ? ":" + coords.classifier() : "")
+        // Aether coordinate form: groupId:artifactId:extension:version
+        String coordsStr = coords.groupId() + ":" + coords.artifactId() + ":" + coords.type()
                 + ":" + coords.version();
 
         Artifact artifact = new DefaultArtifact(coordsStr);
