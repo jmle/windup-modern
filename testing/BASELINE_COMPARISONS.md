@@ -62,9 +62,11 @@ Findings:
    (`Cannot find a Java installation matching languageVersion=17`). → *Java-wrong-ish, but really an
    environment/toolchain limitation; the Go provider hits the same Gradle constraint.*
 2. **Detector chose Gradle and never fell back to Maven.** `BuildToolDetector` prefers `build.gradle`
-   over `pom.xml`. petclinic ships both; Maven (embedded Aether, no toolchain gate, parent BOM
-   `spring-boot-starter-parent:4.0.3` on Central) would very likely have resolved. Picking Gradle-first
-   with no fallback cost us a working resolution. → **improvement: build-tool fallback.**
+   over `pom.xml`. petclinic ships both; Maven (embedded Aether, no toolchain gate) resolves where Gradle
+   failed. → **✅ fixed: build-tool fallback** — when the detected tool resolves 0 deps and the other
+   build file is present, `WorkspaceContext` now retries with the other tool before degrading to static
+   parsing (`alternativeBuildTool`). Verified on petclinic: *"GRADLE resolved 0 dependencies; falling back
+   to MAVEN"* → 4 deps **with versions + a transitive** (vs the version-less static parse before).
 3. **The provider mutated the user's `build.gradle`.** The (then-current) append-to-build-file approach
    left an injected `konveyorResolveDependencies` task behind (git showed `M build.gradle`). → **FIXED
    on `main` by PR #19** (DSL-agnostic `--init-script` injection never touches the build file). The
