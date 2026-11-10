@@ -186,6 +186,26 @@ entries:
     evidence: FAILING_TESTS.md#3-petclinic
     status: excluded
 
+  - id: tackle-testapp-local-storage-00001-app-vs-dep-attribution
+    tests: [tackle-testapp-package-filter, tackle-testapp-with-deps]
+    rule: local-storage-00001
+    classification: go-wrong
+    direction: [java-more, java-fewer]
+    summary: >
+      io.konveyor.demo.config.ApplicationConfiguration is a MODULE in tackle-testapp's multi-module build
+      (configuration-utils/src/...) AND is published as the configuration-utils dependency, so the same
+      class exists as both application source and a resolved dependency. local-storage-00001
+      (java.referenced CONSTRUCTOR_CALL java.io.File*) matches its file-I/O. The native provider attributes
+      the match to the real module SOURCE (io/konveyor/demo/config/ApplicationConfiguration.java:20); Go
+      attributes it to the decompiled DEPENDENCY copy (m2/.../configuration-utils/.../ApplicationConfiguration.java).
+      Same finding, better location.
+    # Scoped tightly (these 2 tests + this one rule): java-more = Java's app-source incident; java-fewer =
+    # Go's redundant decompiled dep-copy incident (a nonsource/m2 path). Not a missed match.
+    resolution: Accept Java output; attribution-only difference for a class present as both module source and dependency.
+    evidence: BASELINE_COMPARISONS.md
+    status: accepted
+    first_seen: 2026-11-10
+
   # NOTE: the earlier speculative `delta-*` / `drift-*` entries (Quarkus 3.40 baselines, new OpenJDK
   # rules, hibernate-orm7, quarkus maven-tooling message/link drift, tackle labelSelector,
   # nerd-dinner-full, "update test results") were removed. They were artifacts of the STALE forked
