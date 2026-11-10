@@ -209,8 +209,20 @@ public class MavenBuildTool implements BuildTool {
             collectRequest.addDependency(dep);
         }
 
-        CollectResult collectResult = repoSystem.collectDependencies(session, collectRequest);
-        return collectResult.getRoot();
+        // Lenient collection: if some nodes can't be collected (e.g. a dep missing from the configured
+        // repos), keep the resolvable subtree instead of discarding the whole transitive graph and
+        // degrading to direct-only static parsing. Aether carries the partial tree on the exception.
+        try {
+            return repoSystem.collectDependencies(session, collectRequest).getRoot();
+        } catch (org.eclipse.aether.collection.DependencyCollectionException e) {
+            CollectResult partial = e.getResult();
+            if (partial != null && partial.getRoot() != null) {
+                LOG.warn("Partial Maven dependency collection ({} unresolved node(s)); using the "
+                        + "resolvable subtree", partial.getExceptions().size());
+                return partial.getRoot();
+            }
+            throw e;
+        }
     }
 
     private java.util.Properties buildProperties(Model model, Model parentModel) {
